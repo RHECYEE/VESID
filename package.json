@@ -1,0 +1,9 @@
+{
+  "name": "vesid",
+  "private": true,
+  "description": "Voluntary 911 address pin survey (Google Apps Script + Google Sheets)",
+  "scripts": {
+    "preview": "node dev/preview-server.js",
+    "test": "node dev/e2e-test.js"
+  }
+}
