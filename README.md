@@ -62,7 +62,10 @@ drop the pin and type the address themselves.
    **Commit changes**.
 
 While you're in `config.js`, set `organization` (who receives the responses),
-and set `mapCenter` and `mapZoom` so the map opens on your area. To get
+and set `mapCenter` and `mapZoom` so the map opens on your area. Also set
+`serviceArea`: the survey refuses pins farther than `radiusKm` from its
+`center`, and your map hides older ones as *Outside area*. Use `radiusKm: 0`
+to turn this off. To get
 coordinates, right-click your area in Google Maps and click the numbers at the
 top of the menu to copy them. Use zoom `10` for a county or `13` for a town.
 
@@ -104,8 +107,11 @@ Open `map.html` and choose one of these:
 On the map you can:
 
 - **Mark checked pins:** add a column named `Status` at the right end of the
-  Sheet and type `Verified` in a row. That pin turns green, and other values
-  turn grey.
+  Sheet. Type `Verified` in a row and that pin turns green.
+- **Filter out junk:** in that `Status` column, type `Junk` (or `Spam`,
+  `Test`, `Delete`). The row is hidden from the map and left out of exports.
+  Tick **Show hidden** on the map to review hidden rows. You can also delete
+  the row in the Sheet.
 - **Export:** **KML** opens in Google Earth and imports into most 911 and GIS
   systems. **GeoJSON** is for GIS tools.
 

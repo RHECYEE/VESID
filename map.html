@@ -66,7 +66,8 @@
     .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 340px 1fr; position: relative; }
     .side { display: flex; flex-direction: column; min-height: 0; background: #fff; border-right: 1px solid var(--border); }
     .side-head { padding: 12px; border-bottom: 1px solid var(--border); }
-    .side-head input { width: 100%; }
+    .side-head input[type=search] { width: 100%; }
+    .side-head .check { display: flex; margin-top: 8px; font-size: 13px; }
     .list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
     .list li + li { border-top: 1px solid #eceff1; }
     .list button { display: block; width: 100%; text-align: left; background: #fff; border: 0; padding: 10px 14px; }
@@ -149,6 +150,8 @@
       <aside class="side">
         <div class="side-head">
           <input type="search" id="filter" placeholder="Filter by address or phone..." aria-label="Filter pins">
+          <label class="check" id="hidden-wrap" hidden><input type="checkbox" id="show-hidden">
+            <span>Show hidden (<span id="hidden-count">0</span>): junk or outside your area</span></label>
         </div>
         <ul class="list" id="list"></ul>
       </aside>
@@ -179,6 +182,20 @@
     'use strict';
     var C = window.VESID_CONFIG || {};
     var LINK_KEY = 'vesid-csv-link';
+    // Status values (typed in the Sheet) that hide a row from the map and exports.
+    var HIDDEN_STATUS = /^(junk|spam|fake|test|reject(ed)?|delete[ds]?|remove[ds]?|ignore[ds]?|bad)$/i;
+    var area = (function (a) {
+      if (!a || !(a.radiusKm > 0)) return null;
+      var c = Array.isArray(a.center) ? a.center : C.mapCenter;
+      return Array.isArray(c) ? { lat: c[0], lng: c[1], radiusKm: a.radiusKm } : null;
+    })(C.serviceArea);
+    function distanceKm(lat1, lng1, lat2, lng2) {
+      var rad = Math.PI / 180;
+      var dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad;
+      var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      return 12742 * Math.asin(Math.min(1, Math.sqrt(h)));
+    }
     var $ = function (id) { return document.getElementById(id); };
     if (C.themeColor) document.documentElement.style.setProperty('--accent', C.themeColor);
     var title = (C.title || 'Address Registry') + ' - Map';
@@ -264,11 +281,16 @@
         var lat = parseFloat(cell(row, ix.lat));
         var lng = parseFloat(cell(row, ix.lng));
         if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
-        out.push({
+        var item = {
           row: r + 1, lat: lat, lng: lng,
           label: cell(row, ix.address), phone: cell(row, ix.phone),
           time: cell(row, ix.time), status: cell(row, ix.status)
-        });
+        };
+        item.km = area ? distanceKm(area.lat, area.lng, lat, lng) : 0;
+        item.outside = !!area && item.km > area.radiusKm;
+        item.junk = HIDDEN_STATUS.test(item.status);
+        item.hidden = item.outside || item.junk;
+        out.push(item);
       }
       return out;
     }
@@ -281,7 +303,9 @@
         var data = toRows(parseCSV(text));
         render(data);
         $('start').hidden = true;
-        showStatus(data.length + (data.length === 1 ? ' pin' : ' pins') + ' loaded ' + sourceNote + '.');
+        var hid = data.filter(function (r) { return r.hidden; }).length;
+        showStatus(data.length + (data.length === 1 ? ' response' : ' responses') + ' loaded ' + sourceNote +
+          (hid ? ' (' + hid + ' hidden: junk or outside your area).' : '.'));
         return true;
       } catch (err) {
         showStatus(err.message, true);
@@ -399,6 +423,7 @@
       var p = el('p');
       p.appendChild(a);
       box.appendChild(p);
+      if (r.outside) box.appendChild(el('p', 'meta', 'Outside your area: ' + Math.round(r.km) + ' km from the map center.'));
       box.appendChild(el('p', 'meta', [r.status || 'New', r.time, 'Sheet row ' + r.row].filter(Boolean).join(' | ')));
       return box;
     }
@@ -406,7 +431,7 @@
     function render(data) {
       rows = data.slice().reverse(); // newest first (Forms appends new rows at the bottom)
       markers = rows.map(function (r) {
-        var m = L.marker([r.lat, r.lng], { icon: pinIcon(statusColor(r.status)), title: r.label });
+        var m = L.marker([r.lat, r.lng], { icon: pinIcon(rowColor(r)), title: r.label });
         m.bindPopup(popupFor(r), { maxWidth: 290 });
         m.bindTooltip(el('span', '', r.label || '(no address given)'),
           { permanent: true, direction: 'top', className: 'pin-label', interactive: false });
@@ -420,11 +445,15 @@
     function visible() {
       var q = $('filter').value.trim().toLowerCase();
       var out = [];
+      var showHidden = $('show-hidden').checked;
       rows.forEach(function (r, i) {
+        if (r.hidden && !showHidden) return;
         if (!q || [r.label, r.phone, r.status].join(' ').toLowerCase().indexOf(q) !== -1) out.push(i);
       });
       return out;
     }
+    function chipText(r) { return r.junk ? r.status : r.outside ? 'Outside area' : (r.status || 'New'); }
+    function rowColor(r) { return r.hidden ? '#5f6368' : statusColor(r.status); }
 
     function applyFilter() {
       var vis = visible();
@@ -437,8 +466,8 @@
         var b = el('button');
         b.type = 'button';
         var lab = el('div', 'item-label', r.label || '(no address given)');
-        var chip = el('span', 'chip', r.status || 'New');
-        chip.style.background = statusColor(r.status);
+        var chip = el('span', 'chip', chipText(r));
+        chip.style.background = rowColor(r);
         lab.appendChild(chip);
         b.appendChild(lab);
         b.appendChild(el('div', 'item-sub', [r.phone, r.time].filter(Boolean).join(' | ') || (r.lat.toFixed(5) + ', ' + r.lng.toFixed(5))));
@@ -453,10 +482,14 @@
         li.appendChild(b);
         list.appendChild(li);
       });
-      if (!vis.length) list.appendChild(el('li', 'empty', rows.length ? 'No pins match the filter.' : 'No pins yet.'));
-      $('count').textContent = vis.length === rows.length
-        ? rows.length + (rows.length === 1 ? ' pin' : ' pins')
-        : vis.length + ' of ' + rows.length + ' pins';
+      var hiddenCount = rows.filter(function (r) { return r.hidden; }).length;
+      var pool = $('show-hidden').checked ? rows.length : rows.length - hiddenCount;
+      $('hidden-count').textContent = hiddenCount;
+      $('hidden-wrap').hidden = hiddenCount === 0;
+      if (!vis.length) list.appendChild(el('li', 'empty', pool ? 'No pins match the filter.' : 'No pins to show.'));
+      $('count').textContent = vis.length === pool
+        ? pool + (pool === 1 ? ' pin' : ' pins')
+        : vis.length + ' of ' + pool + ' pins';
       updateLabelVisibility();
     }
 
@@ -467,6 +500,7 @@
     var filterTimer = null;
     $('filter').addEventListener('input', function () { clearTimeout(filterTimer); filterTimer = setTimeout(applyFilter, 150); });
     $('labels-toggle').addEventListener('change', updateLabelVisibility);
+    $('show-hidden').addEventListener('change', applyFilter);
 
     function showStatus(msg, isError) {
       var s = $('status');

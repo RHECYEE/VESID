@@ -265,6 +265,15 @@
     });
     var marker = null;
 
+    // Pins farther than serviceArea.radiusKm from its center are refused.
+    var area = (function (a) {
+      if (!a || !(a.radiusKm > 0)) return null;
+      var c = Array.isArray(a.center) ? a.center : center;
+      return { latlng: L.latLng(c[0], c[1]), radiusKm: a.radiusKm };
+    })(C.serviceArea);
+    var OUTSIDE_MSG = 'That pin is outside the area this survey covers. Move it onto your home.';
+    function isOutside(ll) { return !!area && area.latlng.distanceTo(ll) / 1000 > area.radiusKm; }
+
     function setPin(latlng, opts) {
       opts = opts || {};
       if (!marker) {
@@ -278,7 +287,8 @@
       $('pin-status').classList.add('placed');
       $('pin-status').textContent = 'Pin placed at ' + ll.lat.toFixed(6) + ', ' + ll.lng.toFixed(6) + '. ' +
         (opts.note || 'Drag it if it is not exactly on your home.');
-      clearState('q-pin');
+      if (isOutside(ll)) setState('q-pin', 'error', OUTSIDE_MSG);
+      else clearState('q-pin');
     }
 
     map.on('click', function (e) {
@@ -327,6 +337,7 @@
     function validate() {
       var first = null;
       if (!marker) { setState('q-pin', 'error', 'Please drop a pin on your home'); first = first || 'q-pin'; }
+      else if (isOutside(marker.getLatLng())) { setState('q-pin', 'error', OUTSIDE_MSG); first = first || 'q-pin'; }
       var address = $('address').value.trim();
       if (!address) {
         setState('q-address', 'error', 'This is a required question');

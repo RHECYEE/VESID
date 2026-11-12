@@ -18,5 +18,9 @@ window.VESID_CONFIG = {
   mapCenter: [44.976394976857975, -101.2487890368622],
   mapZoom: 6,
 
+  // The survey refuses pins farther than radiusKm from this center, and your
+  // map hides old ones (as "outside your area"). Set radiusKm: 0 to turn off.
+  serviceArea: { center: [44.976394976857975, -101.2487890368622], radiusKm: 150 },
+
   themeColor: '#b3261e'
 };

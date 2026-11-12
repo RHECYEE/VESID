@@ -32,6 +32,7 @@ function configJs(over) {
     title: 'Voluntary 911 Address Registry', organization: 'Test County 911',
     intro: 'Drop a pin on your home and type the address the way you call it.',
     formLink: FORM_LINK, mapCenter: CENTER, mapZoom: 13, themeColor: '#b3261e',
+    serviceArea: { center: CENTER, radiusKm: 50 },
   }, over);
   return 'window.VESID_CONFIG = ' + JSON.stringify(cfg) + ';';
 }
@@ -58,7 +59,14 @@ async function shot(page, name) {
 }
 
 async function clickMap(page, fx = 0.5, fy = 0.5) {
+  // mouse.click uses viewport coordinates, so the map must be on screen.
+  await page.locator('#map').scrollIntoViewIfNeeded();
   const box = await page.locator('#map').boundingBox();
+  const vh = page.viewportSize().height;
+  if (box.y < 0 || box.y + box.height > vh) {
+    await page.evaluate((y) => window.scrollBy(0, y), box.y + box.height / 2 - vh / 2);
+    Object.assign(box, await page.locator('#map').boundingBox());
+  }
   await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
 }
 
@@ -70,6 +78,8 @@ const SHEET_CSV = [
   '11/11/2026 8:45:00,"<img src=x onerror=""window.__xss=1"">Bad Label",45.680100,-111.040100,,',
   '11/11/2026 9:00:00,"Line one\nline two",45.675000,-111.045000,,',
   '11/11/2026 9:05:00,No pin row,,,,',
+  '11/11/2026 9:06:00,Long Joke Name,36.028007,-115.118311,,',
+  '11/11/2026 9:07:00,Test entry,45.678000,-111.040000,,Junk',
 ].join('\r\n');
 
 (async () => {
@@ -202,6 +212,26 @@ const SHEET_CSV = [
     });
     await ctx.close();
 
+    await check('survey: a pin outside the service area is refused and not sent', async () => {
+      const c = await browser.newContext();
+      const p = await c.newPage();
+      const l = { posts: [], geocoder: [], errors: [] };
+      await prepare(p, { serviceArea: { center: CENTER, radiusKm: 0.5 } }, l);
+      await p.goto(base);
+      await p.waitForSelector('#map .leaflet-tile-loaded');
+      await clickMap(p, 0.12, 0.88);
+      await p.waitForSelector('.leaflet-marker-icon.pin');
+      assert.match(await p.textContent('#q-pin .msg'), /outside the area/);
+      assert.ok(await p.$eval('#q-pin', (n) => n.classList.contains('has-error')));
+      await p.fill('#address', 'Curly Pig Ranch');
+      await p.click('#submit-btn');
+      await p.waitForTimeout(300);
+      assert.equal(l.posts.length, 0);
+      assert.equal(await p.isVisible('#form'), true);
+      log.errors.push(...l.errors);
+      await c.close();
+    });
+
     await check('survey: without formLink it says setup is needed and sends nothing', async () => {
       const c = await browser.newContext();
       const p = await c.newPage();
@@ -259,6 +289,19 @@ const SHEET_CSV = [
       for (const want of ['Curly Pig Ranch', "John Smith's house, east gate", '175621 HWY 212', 'Line one\nline two']) {
         assert.ok(labels.includes(want), 'missing label ' + JSON.stringify(want));
       }
+    });
+
+    await check('map: junk status and far-away pins are hidden until you ask to see them', async () => {
+      assert.equal(await m.isVisible('#hidden-wrap'), true);
+      assert.equal(await m.textContent('#hidden-count'), '2');
+      let labels = await m.$$eval('.pin-label', (t) => t.map((n) => n.textContent));
+      assert.ok(!labels.includes('Long Joke Name') && !labels.includes('Test entry'));
+      await m.check('#show-hidden');
+      await m.waitForFunction(() => document.getElementById('count').textContent === '7 pins');
+      const chips = await m.$$eval('#list .chip', (c) => c.map((n) => n.textContent));
+      assert.ok(chips.includes('Outside area') && chips.includes('Junk'));
+      await m.uncheck('#show-hidden');
+      await m.waitForFunction(() => document.getElementById('count').textContent === '5 pins');
     });
 
     await check('map: submitted HTML is shown as text, never run', async () => {
