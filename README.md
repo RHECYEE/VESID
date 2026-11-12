@@ -5,7 +5,7 @@ A survey that looks like a Google Form. Residents open a link (no sign-in),
 submit. Each response goes into **your Google Form** and its Google Sheet.
 You then see every pin, labelled, on your own map.
 
-Good answers: `Curly Pig Ranch`, `Frida Blue Horses House`, `175621 HWY 212`.
+Good answers: `Curly Pig Ranch`, `John Smith's house`, `175621 HWY 212`.
 Too vague: `Mom's house`. The survey warns about vague answers once before it
 sends them.
 
@@ -30,9 +30,14 @@ drop the pin and type the address themselves.
    - `Longitude`
    - `Phone` (optional: if you leave it out, the survey has no phone box)
 3. Open the **Settings** tab. Under *Responses*, keep **Collect email
-   addresses** set to *Do not collect*, and keep **Limit to 1 response**
-   **off**. Either setting makes Google ask people to sign in.
-4. Open the **Responses** tab:
+   addresses** set to *Do not collect*, keep **Limit to 1 response** **off**,
+   and don't set **Send responders a copy** to *Always*. Any of these makes
+   Google ask people to sign in. Don't add a file-upload question either,
+   because that also needs sign-in.
+4. Click **Publish** (top right). Next to **Responders**, click **Manage** and
+   choose **Anyone with the link**. A form that isn't published, or is set to
+   *Restricted*, sends everyone to a Google sign-in page.
+5. Open the **Responses** tab:
    - Click **Link to Sheets**, then **Create**. Responses now also go to a
      Google Sheet.
    - Click the **⋮** menu, then **Get email notifications for new responses**,
@@ -107,6 +112,18 @@ On the map you can:
 Prefer Google's own map? In [Google My Maps](https://mymaps.google.com), click
 **Import** and pick the Sheet. Choose *Latitude* and *Longitude* for the
 position and *Address* for the title.
+
+## Not getting responses?
+
+Test the Form the way a resident would. Open its responder link (the part of
+`formLink` before `?usp=`, ending in `/viewform`) in a **private or incognito
+window**:
+
+- **It asks you to sign in:** residents can't respond, and the survey can't
+  detect that. Redo step 1, items 3 and 4, until the Form opens without
+  signing in.
+- **It opens without sign-in:** submit once through the survey, then check the
+  Form's **Responses** tab.
 
 ## Good to know
 

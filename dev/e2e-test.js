@@ -65,7 +65,7 @@ async function clickMap(page, fx = 0.5, fy = 0.5) {
 const SHEET_CSV = [
   'Timestamp,Address,Latitude,Longitude,Phone,Status',
   '11/10/2026 9:14:02,Curly Pig Ranch,45.684210,-111.051230,406-555-0100,Verified',
-  '11/10/2026 10:02:44,"Frida Blue Horses House, east gate",45.672001,-111.031950,,',
+  '11/10/2026 10:02:44,"John Smith\'s house, east gate",45.672001,-111.031950,,',
   '11/11/2026 8:30:10,175621 HWY 212,45.669500,-111.060010,,New',
   '11/11/2026 8:45:00,"<img src=x onerror=""window.__xss=1"">Bad Label",45.680100,-111.040100,,',
   '11/11/2026 9:00:00,"Line one\nline two",45.675000,-111.045000,,',
@@ -106,7 +106,7 @@ const SHEET_CSV = [
       const verdicts = await page.evaluate(() => {
         const out = {};
         for (const t of ['home', 'my house', "grandma's farm", 'The Ranch', 'Dads place',
-          'Curly Pig Ranch', 'Frida Blue Horses House', '175621 HWY 212', 'Lot 14 Pine Ridge']) {
+          'Curly Pig Ranch', "John Smith's house", '175621 HWY 212', 'Lot 14 Pine Ridge']) {
           document.getElementById('address').value = t;
           document.getElementById('q-address').classList.remove('has-warn', 'has-error');
           document.getElementById('submit-btn').click();
@@ -117,7 +117,7 @@ const SHEET_CSV = [
       });
       assert.deepEqual(verdicts, {
         home: true, 'my house': true, "grandma's farm": true, 'The Ranch': true, 'Dads place': true,
-        'Curly Pig Ranch': false, 'Frida Blue Horses House': false, '175621 HWY 212': false, 'Lot 14 Pine Ridge': false,
+        'Curly Pig Ranch': false, "John Smith's house": false, '175621 HWY 212': false, 'Lot 14 Pine Ridge': false,
       });
       assert.equal(log.posts.length, 0);
     });
@@ -256,7 +256,7 @@ const SHEET_CSV = [
       assert.equal(await m.$$eval('.leaflet-marker-icon.pin', (x) => x.length), 5);
       assert.equal(await m.textContent('#count'), '5 pins');
       const labels = await m.$$eval('.pin-label', (t) => t.map((n) => n.textContent));
-      for (const want of ['Curly Pig Ranch', 'Frida Blue Horses House, east gate', '175621 HWY 212', 'Line one\nline two']) {
+      for (const want of ['Curly Pig Ranch', "John Smith's house, east gate", '175621 HWY 212', 'Line one\nline two']) {
         assert.ok(labels.includes(want), 'missing label ' + JSON.stringify(want));
       }
     });
