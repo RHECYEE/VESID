@@ -15,8 +15,8 @@ window.VESID_CONFIG = {
 
   // Where the map starts: [latitude, longitude] and zoom
   // (4 = whole US, 10 = a county, 13 = a town).
-  mapCenter: [39.8283, -98.5795],
-  mapZoom: 4,
+  mapCenter: [44.976394976857975, -101.2487890368622],
+  mapZoom: 6,
 
   themeColor: '#b3261e'
 };
