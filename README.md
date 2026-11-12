@@ -1,126 +1,127 @@
 # VESID: Voluntary 911 Address Pins
 
-A survey that looks like a Google Form, where residents can choose to share
-where their home is for 911:
+A survey that looks like a Google Form. Residents open a link (no sign-in),
+**drop a pin on their home**, **type the address the way they call it**, and
+submit. Each response goes into **your Google Form** and its Google Sheet.
+You then see every pin, labelled, on your own map.
 
-1. **Drop a pin** on their home. They can search an address, use their current
-   location, or tap the map, and switch to a satellite view to put the pin on
-   the right building.
-2. **Say what they call that address**, for example "Grandma's farm", "the blue
-   house past the Cedar Creek bridge", or "Lot 14, Pine Ridge Park".
-3. Optionally add a street address (filled in from the pin when possible), a
-   name, a phone number, and notes for responders. They must tick a consent box.
-4. **Submit.** Each response becomes a row in **your** Google Sheet. You see
-   every pin, with its name, on a private map, and can export the pins as CSV,
-   GeoJSON or KML.
+Good answers: `Curly Pig Ranch`, `Frida Blue Horses House`, `175621 HWY 212`.
+Too vague: `Mom's house`. The survey warns about vague answers once before it
+sends them.
 
-Everything runs as a free Google Apps Script attached to a Google Sheet, so
-you don't need a server or a separate hosting account.
+The survey never looks addresses up or fills them in automatically. People
+drop the pin and type the address themselves.
 
-```
-apps-script/
-  Code.gs          server: saves responses, serves the pages, Sheet menu
-  Form.html        the survey residents fill in
-  Map.html         your private map of every response
-  appsscript.json  optional manifest (only needed if you deploy with clasp)
-dev/
-  preview-server.js  run the survey locally with a fake Sheet
-  e2e-test.js        browser test of the survey and the map
-```
-
-## Set it up (about 10 minutes)
-
-1. **Create a Google Sheet** (go to <https://sheets.new>) and give it a name,
-   such as "911 Address Pins".
-2. In the Sheet, open **Extensions > Apps Script**.
-3. **Code.gs:** delete what is in the editor, then paste in all of
-   [`apps-script/Code.gs`](apps-script/Code.gs). Edit the `CONFIG` block at the
-   top:
-   - `organization`: who receives the responses (shown on the survey).
-   - `mapCenter` and `mapZoom`: where the map opens. To get coordinates,
-     right-click your town in Google Maps and click the numbers at the top of
-     the menu to copy them. Use zoom `10` for a county or `13` for a town.
-   - `searchCountryCodes`: `'us'` by default.
-4. **Form and Map pages:** click **+** next to *Files*, choose **HTML**, and
-   name it exactly `Form`. Paste in
-   [`apps-script/Form.html`](apps-script/Form.html). Do the same with a file
-   named exactly `Map`, pasting in [`apps-script/Map.html`](apps-script/Map.html).
-5. Click **Save** (the disk icon).
-6. Go back to the Sheet tab and **reload it**. A **911 Address Map** menu
-   appears. Choose **911 Address Map > Set up / show map access key**.
-   - The first time, Google asks you to authorize the script. Choose your
-     account. On "Google hasn't verified this app", click **Advanced > Go to
-     (your project) (unsafe)** and then **Allow**. This is your own script.
-     Then click the menu item again.
-   - A **Responses** tab is created, and you are shown your **map access
-     key**. Keep it private.
-7. Back in Apps Script, click **Deploy > New deployment**. Click the gear,
-   choose **Web app**, and set:
-   - *Execute as:* **Me**
-   - *Who has access:* **Anyone**
-
-   Click **Deploy**, then copy the **Web app URL** (it ends in `/exec`).
-
-You now have two links:
-
-| Link | Who it's for |
+| File | What it is |
 | --- | --- |
-| `https://script.google.com/macros/s/.../exec` | **The survey.** Share it with residents. |
-| `https://script.google.com/macros/s/.../exec?view=map` | **Your map.** Enter the access key to see every pin. |
+| `index.html` | The survey residents fill in |
+| `map.html` | Your map of every response |
+| `config.js` | Your settings: Google Form link, title, where the map starts |
+| `dev/` | Local preview and automated test (for development) |
 
-### After you change the code or `CONFIG`
+## Setup
 
-Go to **Deploy > Manage deployments**, click the pencil, set *Version* to
-**New version**, and click **Deploy**. The links stay the same. Saving the
-code without doing this does not change the live survey.
+### 1. Make the Google Form (5 minutes)
 
-## Using the responses
+1. Go to <https://forms.new>. Give the form a title, such as "911 Address Pins".
+2. Add these **Short answer** questions, named exactly:
+   - `Address`
+   - `Latitude`
+   - `Longitude`
+   - `Phone` (optional: if you leave it out, the survey has no phone box)
+3. Open the **Settings** tab. Under *Responses*, keep **Collect email
+   addresses** set to *Do not collect*, and keep **Limit to 1 response**
+   **off**. Either setting makes Google ask people to sign in.
+4. Open the **Responses** tab:
+   - Click **Link to Sheets**, then **Create**. Responses now also go to a
+     Google Sheet.
+   - Click the **⋮** menu, then **Get email notifications for new responses**,
+     if you want an email for each one.
 
-- **The Sheet:** each response is one row: time, reference number, address
-  name, latitude, longitude, street address, contact name, phone, notes,
-  consent, a Google Maps link, and **Status**.
-- **Status:** new responses are `New` (red pins). Change a cell to `Verified`
-  once you've checked it and the pin turns green. Any other value shows grey.
-  Click **Refresh** on the map to see changes.
-- **Get an email when someone responds:** in the Sheet, use **Tools >
-  Notification settings > Edit notifications**.
-- **Exports:** the map's **CSV**, **GeoJSON** and **KML** buttons download the
-  pins currently shown (the filter applies). KML opens in Google Earth, and
-  GeoJSON or KML import into most GIS and 911 mapping systems (ArcGIS, QGIS,
-  and others). If your browser blocks the download, use **File > Download >
-  CSV** in the Sheet instead.
-- **Map access key:** anyone with the key can see every response. To revoke
-  it, choose **911 Address Map > Replace map access key**. **Lock** on the map
-  page makes that device forget the key.
+### 2. Connect the survey to your Form
 
-## Privacy and limits
+1. In the form editor, click the **⋮** menu (top right), then **Get pre-filled
+   link**.
+2. Type these exact words into the questions:
 
-- Responses are stored only in your Google Sheet. Anyone you share the Sheet
-  with can read them, and the map page needs the access key.
-- The script does not record respondents' IP addresses or Google accounts.
-  Respondents don't need a Google account.
-- Address search and the "Fill from pin" lookup send the search text and pin
-  coordinates to OpenStreetMap's Nominatim service. Map tiles come from
-  OpenStreetMap, and satellite images come from Esri. These services are free
-  for light use with attribution. For a large campaign (thousands of people at
-  once), check the [Nominatim usage policy](https://operations.osmfoundation.org/policies/nominatim/)
-  and Esri's terms, or switch to a paid provider.
-- Text people type is saved as plain text: it can't become a spreadsheet
-  formula, and it's shown as text on the map.
-- Google shows a "created by another user" banner above web apps run from
-  personal Google accounts. That's normal.
-- Some browsers may block "Use my current location" inside Google's page. If
-  that happens the survey says so, and searching or tapping the map still
-  works.
+   | Question | Type this |
+   | --- | --- |
+   | Address | `ADDRESS` |
+   | Latitude | `LAT` |
+   | Longitude | `LNG` |
+   | Phone | `PHONE` |
+
+3. Click **Get link**, then **Copy link**.
+4. On GitHub, open [`config.js`](config.js) and click the **pencil** icon. Paste
+   the link between the quotes on the `formLink: ''` line, then click
+   **Commit changes**.
+
+While you're in `config.js`, set `organization` (who receives the responses),
+and set `mapCenter` and `mapZoom` so the map opens on your area. To get
+coordinates, right-click your area in Google Maps and click the numbers at the
+top of the menu to copy them. Use zoom `10` for a county or `13` for a town.
+
+### 3. Put the survey online (GitHub Pages, free)
+
+1. On the free GitHub plan, Pages needs a **public** repository. Go to
+   **Settings → General**, scroll to **Danger Zone**, and click **Change
+   visibility → Public**. Only the code becomes public. Responses stay in your
+   Google Sheet, never in this repository.
+2. Go to **Settings → Pages**. Under *Build and deployment*, set:
+   - *Source:* **Deploy from a branch**
+   - *Branch:* **ccr-1fbf19ad-njh2bq**, folder **/ (root)**
+
+   Then click **Save**.
+3. Wait a minute or two, then reload that settings page. It shows the link.
+
+Your links:
+
+- **Survey (send to residents):** `https://rhecyee.github.io/VESID/`
+- **Your map:** `https://rhecyee.github.io/VESID/map.html`
+
+If you'd rather not make the repository public, you can drag the folder onto
+<https://app.netlify.com/drop> instead. That needs a free Netlify account.
+
+## Seeing the pins
+
+Open `map.html` and choose one of these:
+
+- **Open CSV:** in the Sheet, choose **File → Download → Comma Separated
+  Values (.csv)**, then open that file on the map. The file stays on your
+  device.
+- **Live link** (updates itself): in the Sheet, choose **File → Share → Publish
+  to web**. Pick the **Form Responses 1** tab and **Comma-separated values
+  (.csv)**, click **Publish**, and copy the link. Paste it into **Live link** on
+  the map. It is remembered in that browser, and **Refresh** pulls in new
+  responses. **Anyone who has that link can read the responses**, so keep it
+  private. To turn it off, use *Publish to web → Stop publishing*.
+
+On the map you can:
+
+- **Mark checked pins:** add a column named `Status` at the right end of the
+  Sheet and type `Verified` in a row. That pin turns green, and other values
+  turn grey.
+- **Export:** **KML** opens in Google Earth and imports into most 911 and GIS
+  systems. **GeoJSON** is for GIS tools.
+
+Prefer Google's own map? In [Google My Maps](https://mymaps.google.com), click
+**Import** and pick the Sheet. Choose *Latitude* and *Longitude* for the
+position and *Address* for the title.
+
+## Good to know
+
+- If someone opens the Google Form directly, it has no map. Add a line to the
+  Form's description pointing people to the survey link.
+- The survey can't read Google's reply, so it reports "sent" unless the
+  internet connection fails. Check the Sheet after your first test.
+- Map tiles come from OpenStreetMap, and satellite images come from Esri. Both
+  are free for light use with attribution.
 - This is a voluntary supplement. It does not change official 911 addressing,
   so share the exports with your 911 center or county GIS office.
 
 ## Development
 
-Run the survey locally against a fake, in-memory Sheet. Nothing is sent to
-Google.
-
 ```bash
-node dev/preview-server.js        # prints the survey and map URLs and the key
-node dev/e2e-test.js [shots-dir]  # server checks plus a browser test (needs Playwright + Chromium)
+node dev/serve.js                # http://localhost:8787/ and /map.html
+node dev/e2e-test.js [shots-dir] # browser test (needs Playwright + Chromium); Google is stubbed
 ```

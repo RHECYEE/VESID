@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voluntary 911 Address Registry</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap">
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
+        integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb"
+        crossorigin="anonymous">
+  <style>
+    :root {
+      --accent: #b3261e;
+      --surface: #ffffff;
+      --text: #202124;
+      --muted: #5f6368;
+      --border: #dadce0;
+      --error: #d93025;
+      --warn: #b06000;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { margin: 0; }
+    body {
+      background: #f7ecea;
+      background: color-mix(in srgb, var(--accent) 9%, #ffffff);
+      color: var(--text);
+      font: 14px/1.5 Roboto, "Helvetica Neue", Arial, sans-serif;
+      -webkit-text-size-adjust: 100%;
+    }
+    .page { max-width: 770px; margin: 12px auto 40px; padding: 0 16px; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 24px; margin-bottom: 12px;
+    }
+    .title-card { border-top: 10px solid var(--accent); padding-top: 22px; }
+    h1 { font-size: 32px; font-weight: 400; line-height: 1.25; margin: 0 0 12px; }
+    .intro { margin: 0 0 12px; font-size: 15px; }
+    .org { margin: 0 0 12px; color: var(--muted); }
+    .notice {
+      margin: 16px 0 0; padding: 12px 14px; border-radius: 6px;
+      background: color-mix(in srgb, var(--accent) 8%, #ffffff); border-left: 4px solid var(--accent);
+    }
+    .setup { margin: 16px 0 0; padding: 12px 14px; border-radius: 6px; background: #fef7e0; border-left: 4px solid #f9ab00; }
+    .req-note { color: var(--error); margin: 16px 0 0; }
+    .req { color: var(--error); }
+
+    .q:focus-within { box-shadow: inset 6px 0 0 var(--accent); }
+    .q.has-error { border-color: var(--error); }
+    .q-title { display: block; font-size: 16px; font-weight: 500; margin: 0 0 4px; }
+    .q-help { color: var(--muted); margin: 0 0 14px; font-size: 13px; }
+    .examples { margin: 0 0 14px; padding: 0; list-style: none; font-size: 13px; display: grid; gap: 2px; }
+    .examples li::before { display: inline-block; width: 18px; font-weight: 700; }
+    .examples .good::before { content: "\2713"; color: #188038; }
+    .examples .bad::before { content: "\2717"; color: var(--error); }
+    .optional { color: var(--muted); font-weight: 400; font-size: 13px; }
+
+    input[type=text], input[type=tel] {
+      width: 100%; font: inherit; font-size: 16px; color: var(--text);
+      border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
+      padding: 8px 0 7px; background: transparent; outline: none;
+    }
+    input:focus { border-bottom: 2px solid var(--accent); padding-bottom: 6px; }
+    .q.has-error input { border-bottom-color: var(--error); }
+
+    .msg { display: none; align-items: flex-start; gap: 8px; font-size: 13px; margin-top: 12px; }
+    .msg::before {
+      content: "!"; display: inline-grid; place-items: center; flex: none; margin-top: 1px;
+      width: 18px; height: 18px; border-radius: 50%; color: #fff; font-weight: 700; font-size: 12px;
+    }
+    .q.has-error .msg { display: flex; color: var(--error); }
+    .q.has-error .msg::before { background: var(--error); }
+    .q.has-warn .msg { display: flex; color: var(--warn); }
+    .q.has-warn .msg::before { background: var(--warn); }
+
+    button { font: inherit; cursor: pointer; }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .btn-primary {
+      background: var(--accent); color: #fff; border: 0; border-radius: 4px;
+      padding: 10px 24px; font-weight: 500; letter-spacing: .25px;
+    }
+    .btn-primary:hover { filter: brightness(1.08); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+    .btn-primary:disabled { opacity: .6; cursor: progress; }
+    .btn-text { background: none; border: 0; color: var(--accent); font-weight: 500; padding: 6px 8px; border-radius: 4px; }
+    .btn-text:hover { background: color-mix(in srgb, var(--accent) 7%, #ffffff); }
+    .btn-text:disabled { opacity: .6; }
+
+    .map-tools { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 0 8px; flex-wrap: wrap; }
+    .map-tools .btn-text { padding-left: 0; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+    .seg button { background: #fff; border: 0; padding: 6px 14px; font-size: 13px; color: var(--muted); }
+    .seg button + button { border-left: 1px solid var(--border); }
+    .seg button[aria-pressed=true] { background: var(--accent); color: #fff; }
+    .map { height: clamp(300px, 58vh, 480px); border-radius: 6px; border: 1px solid var(--border); z-index: 0; cursor: crosshair; }
+    .pin-status { margin: 10px 0 0; font-size: 13px; color: var(--muted); }
+    .pin-status.placed { color: var(--text); }
+    .pin { background: none; border: 0; filter: drop-shadow(0 2px 2px rgba(0,0,0,.35)); }
+
+    .actions { display: flex; justify-content: space-between; align-items: center; margin: 4px 0 8px; }
+    .agree { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+    .submit-error { color: var(--error); margin: 0 0 12px; }
+    .done h2 { font-size: 24px; font-weight: 400; margin: 0 0 12px; }
+
+    @media (max-width: 520px) {
+      .page { margin-top: 8px; }
+      .card { padding: 18px 16px; }
+      h1 { font-size: 26px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="card title-card">
+      <h1 id="title">Voluntary 911 Address Registry</h1>
+      <p class="intro" id="intro"></p>
+      <p class="org" id="org" hidden></p>
+      <p class="notice"><strong>In an emergency, always call 911.</strong> This survey does not contact emergency services.</p>
+      <p class="setup" id="setup" hidden>Setup needed: paste your Google Form's pre-filled link into <code>config.js</code> (see README). Responses can't be sent until then.</p>
+      <p class="req-note">* Required</p>
+    </section>
+
+    <form id="form" novalidate>
+      <section class="card q" id="q-pin">
+        <span class="q-title" id="pin-title">Drop a pin on your home <span class="req">*</span></span>
+        <p class="q-help">Tap the map where your home is. Drag the pin to fix it.
+          Switch to <strong>Satellite</strong> to put it right on your house.</p>
+        <div class="map-tools">
+          <button type="button" class="btn-text" id="locate-btn">Use my location</button>
+          <div class="seg" role="group" aria-label="Map type">
+            <button type="button" data-layer="street" aria-pressed="true">Map</button>
+            <button type="button" data-layer="satellite" aria-pressed="false">Satellite</button>
+          </div>
+        </div>
+        <div class="map" id="map" aria-labelledby="pin-title"></div>
+        <p class="pin-status" id="pin-status" aria-live="polite">No pin yet. Tap the map where your home is.</p>
+        <div class="msg">Please drop a pin on your home</div>
+      </section>
+
+      <section class="card q" id="q-address">
+        <label class="q-title" for="address">What do you call this address? <span class="req">*</span></label>
+        <p class="q-help">Type it the way you would tell a 911 dispatcher, so a stranger could find it.</p>
+        <ul class="examples">
+          <li class="good">Curly Pig Ranch</li>
+          <li class="good">Frida Blue Horses House</li>
+          <li class="good">175621 HWY 212</li>
+          <li class="bad">Mom's house (too vague)</li>
+        </ul>
+        <input type="text" id="address" name="address" maxlength="120" autocomplete="off" placeholder="Your answer">
+        <div class="msg" id="address-msg">This is a required question</div>
+      </section>
+
+      <section class="card q" id="q-phone" hidden>
+        <label class="q-title" for="phone">Phone number <span class="optional">(optional)</span></label>
+        <p class="q-help">Helps match a 911 call from this number to this place.</p>
+        <input type="tel" id="phone" name="phone" maxlength="40" autocomplete="tel" placeholder="Your answer">
+      </section>
+
+      <p class="submit-error" id="submit-error" role="alert" hidden></p>
+      <div class="actions">
+        <button type="submit" class="btn-primary" id="submit-btn">Submit</button>
+        <button type="button" class="btn-text" id="clear-btn">Clear form</button>
+      </div>
+      <p class="agree" id="agree">By submitting, you choose to share this location for 911 use.</p>
+    </form>
+
+    <section class="card title-card done" id="done" hidden>
+      <h2 id="done-title"></h2>
+      <p>Thank you. Your pin and address were sent.</p>
+      <p><button type="button" class="btn-text" id="again-btn" style="padding-left:0">Submit another address</button></p>
+    </section>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
+          integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO"
+          crossorigin="anonymous"></script>
+  <script>
+  (function () {
+    'use strict';
+    var C = window.VESID_CONFIG || {};
+    var $ = function (id) { return document.getElementById(id); };
+
+    // ---- Config --------------------------------------------------------
+    if (C.themeColor) document.documentElement.style.setProperty('--accent', C.themeColor);
+    var title = C.title || 'Voluntary 911 Address Registry';
+    document.title = title;
+    $('title').textContent = title;
+    $('done-title').textContent = title;
+    $('intro').textContent = C.intro || '';
+    if (C.organization) {
+      $('org').textContent = 'Responses go to ' + C.organization + '.';
+      $('org').hidden = false;
+      $('agree').textContent = 'By submitting, you choose to share this location with ' + C.organization + ' for 911 use.';
+    }
+
+    // Reads the Google Form "pre-filled link": the answers typed as
+    // ADDRESS / LAT / LNG / PHONE tell us which entry.N field is which.
+    function parseFormLink(link) {
+      try {
+        var u = new URL(String(link || '').trim());
+        var m = u.pathname.match(/\/forms\/(?:u\/\d+\/)?d\/e\/([A-Za-z0-9_-]+)\//);
+        if (!m || !/(^|\.)google\.com$/.test(u.hostname)) return null;
+        var entries = {};
+        u.searchParams.forEach(function (value, key) {
+          if (!/^entry\.\d+$/.test(key)) return;
+          var tag = value.trim().toUpperCase();
+          if (tag === 'ADDRESS' || tag === 'LAT' || tag === 'LNG' || tag === 'PHONE') entries[tag.toLowerCase()] = key;
+        });
+        if (!entries.address || !entries.lat || !entries.lng) return null;
+        return { action: 'https://docs.google.com/forms/d/e/' + m[1] + '/formResponse', entries: entries };
+      } catch (e) {
+        return null;
+      }
+    }
+    var gform = parseFormLink(C.formLink);
+    if (!gform) $('setup').hidden = false;
+    if (gform && gform.entries.phone) $('q-phone').hidden = false;
+
+    if (!window.L) {
+      $('pin-status').textContent = 'The map could not load. Check your internet connection and reload the page.';
+      return;
+    }
+
+    // ---- Map -----------------------------------------------------------
+    var center = Array.isArray(C.mapCenter) ? C.mapCenter : [39.8283, -98.5795];
+    var startZoom = typeof C.mapZoom === 'number' ? C.mapZoom : 4;
+    var map = L.map('map', { scrollWheelZoom: false }).setView(center, startZoom);
+    var layers = {
+      street: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 20, maxNativeZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+      }),
+      satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 20, maxNativeZoom: 19,
+        attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'
+      })
+    };
+    var activeLayer = layers.street.addTo(map);
+    document.querySelectorAll('.seg button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var next = layers[btn.getAttribute('data-layer')];
+        if (next === activeLayer) return;
+        map.removeLayer(activeLayer);
+        activeLayer = next.addTo(map);
+        document.querySelectorAll('.seg button').forEach(function (b) {
+          b.setAttribute('aria-pressed', String(b === btn));
+        });
+      });
+    });
+    // Scroll-wheel zoom only after the map is clicked, so the page still scrolls.
+    map.on('focus', function () { map.scrollWheelZoom.enable(); });
+    map.on('blur', function () { map.scrollWheelZoom.disable(); });
+    setTimeout(function () { map.invalidateSize(); }, 300);
+
+    var pinIcon = L.divIcon({
+      className: 'pin',
+      html: '<svg width="34" height="46" viewBox="0 0 34 46" aria-hidden="true">' +
+            '<path d="M17 1C8.2 1 1 8 1 16.7 1 28.5 17 45 17 45s16-16.5 16-28.3C33 8 25.8 1 17 1z" ' +
+            'fill="' + (C.themeColor || '#b3261e') + '" stroke="#fff" stroke-width="2"/>' +
+            '<circle cx="17" cy="16.5" r="6" fill="#fff"/></svg>',
+      iconSize: [34, 46], iconAnchor: [17, 45]
+    });
+    var marker = null;
+
+    function setPin(latlng, opts) {
+      opts = opts || {};
+      if (!marker) {
+        marker = L.marker(latlng, { icon: pinIcon, draggable: true, autoPan: true, title: 'Your home' }).addTo(map);
+        marker.on('dragend', function () { setPin(marker.getLatLng()); });
+      } else {
+        marker.setLatLng(latlng);
+      }
+      if (opts.zoom) map.setView(latlng, opts.zoom);
+      var ll = marker.getLatLng();
+      $('pin-status').classList.add('placed');
+      $('pin-status').textContent = 'Pin placed at ' + ll.lat.toFixed(6) + ', ' + ll.lng.toFixed(6) + '. ' +
+        (opts.note || 'Drag it if it is not exactly on your home.');
+      clearState('q-pin');
+    }
+
+    map.on('click', function (e) {
+      var zoomIn = map.getZoom() < 16;
+      setPin(e.latlng, zoomIn ? { zoom: 17, note: 'Zoomed in so you can check it. Drag the pin onto your home.' } : {});
+    });
+
+    $('locate-btn').addEventListener('click', function () {
+      if (!navigator.geolocation) {
+        $('pin-status').textContent = 'Your browser cannot share its location. Tap the map instead.';
+        return;
+      }
+      var btn = $('locate-btn');
+      btn.disabled = true;
+      btn.textContent = 'Finding you...';
+      var done = function () { btn.disabled = false; btn.textContent = 'Use my location'; };
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        setPin(L.latLng(pos.coords.latitude, pos.coords.longitude), {
+          zoom: 18, note: 'Only use this if you are at home. Drag the pin onto your house if needed.'
+        });
+        done();
+      }, function () {
+        $('pin-status').textContent = 'Could not get your location. Move the map and tap your home instead.';
+        done();
+      }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+    });
+
+    // ---- Validation ----------------------------------------------------
+    function setState(id, kind, message) {
+      var card = $(id);
+      card.classList.remove('has-error', 'has-warn');
+      card.classList.add(kind === 'warn' ? 'has-warn' : 'has-error');
+      if (message) card.querySelector('.msg').textContent = message;
+    }
+    function clearState(id) { $(id).classList.remove('has-error', 'has-warn'); }
+
+    // Answers like "Mom's house" or "home" that a stranger could not find.
+    var VAGUE = /^(?:(?:my|our|the|mom'?s?|mother'?s|dad'?s?|father'?s|grandma'?s?|grandpa'?s?|granny'?s|nana'?s|papa'?s|parents'?|aunt'?s|uncle'?s|brother'?s|sister'?s|son'?s|daughter'?s|friend'?s|family)\s+)?(?:house|home|place|farm|ranch|trailer|cabin|apartment|apt)$/i;
+    function isVague(text) {
+      var t = text.replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
+      return t.length < 4 || VAGUE.test(t);
+    }
+    var acceptedVague = '';
+    $('address').addEventListener('input', function () { clearState('q-address'); });
+
+    function validate() {
+      var first = null;
+      if (!marker) { setState('q-pin', 'error', 'Please drop a pin on your home'); first = first || 'q-pin'; }
+      var address = $('address').value.trim();
+      if (!address) {
+        setState('q-address', 'error', 'This is a required question');
+        first = first || 'q-address';
+      } else if (isVague(address) && acceptedVague !== address) {
+        acceptedVague = address;
+        setState('q-address', 'warn',
+          'That may be too vague for a stranger to find. Use the name or number people know it by, ' +
+          'like "Curly Pig Ranch" or "175621 HWY 212". If it is right, press Submit again.');
+        first = first || 'q-address';
+      }
+      if (first) $(first).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return !first;
+    }
+
+    // ---- Submit to the Google Form -------------------------------------
+    $('form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      $('submit-error').hidden = true;
+      if (!validate()) return;
+      if (!gform) {
+        showSubmitError('This survey is not set up yet, so nothing was sent.');
+        return;
+      }
+      var ll = marker.getLatLng();
+      var body = new URLSearchParams();
+      body.append(gform.entries.address, $('address').value.trim());
+      body.append(gform.entries.lat, ll.lat.toFixed(6));
+      body.append(gform.entries.lng, ll.lng.toFixed(6));
+      var phone = $('phone').value.trim();
+      if (gform.entries.phone && phone) body.append(gform.entries.phone, phone);
+
+      var btn = $('submit-btn');
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+      // Google Forms doesn't allow reading the reply from another site
+      // ("no-cors"), so a network failure is the only error we can see.
+      fetch(gform.action, { method: 'POST', mode: 'no-cors', body: body })
+        .then(function () {
+          $('form').hidden = true;
+          $('done').hidden = false;
+          window.scrollTo(0, 0);
+        })
+        .catch(function () {
+          showSubmitError('Could not send. Check your internet connection and press Submit again.');
+        })
+        .then(function () {
+          btn.disabled = false;
+          btn.textContent = 'Submit';
+        });
+    });
+
+    function showSubmitError(msg) {
+      $('submit-error').textContent = msg;
+      $('submit-error').hidden = false;
+    }
+
+    function resetAll() {
+      $('form').reset();
+      if (marker) { map.removeLayer(marker); marker = null; }
+      acceptedVague = '';
+      clearState('q-pin');
+      clearState('q-address');
+      $('pin-status').classList.remove('placed');
+      $('pin-status').textContent = 'No pin yet. Tap the map where your home is.';
+      $('submit-error').hidden = true;
+      map.setView(center, startZoom);
+    }
+
+    var clearTimer = null;
+    $('clear-btn').addEventListener('click', function () {
+      var btn = $('clear-btn');
+      if (!clearTimer) {
+        btn.textContent = 'Click again to clear';
+        clearTimer = setTimeout(function () { clearTimer = null; btn.textContent = 'Clear form'; }, 4000);
+        return;
+      }
+      clearTimeout(clearTimer);
+      clearTimer = null;
+      btn.textContent = 'Clear form';
+      resetAll();
+    });
+
+    $('again-btn').addEventListener('click', function () {
+      resetAll();
+      $('done').hidden = true;
+      $('form').hidden = false;
+      window.scrollTo(0, 0);
+      setTimeout(function () { map.invalidateSize(); }, 50);
+    });
+  })();
+  </script>
+</body>
+</html>

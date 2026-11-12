@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /*
- * End-to-end check of the survey and the owner map against the local preview
- * (dev/preview-server.js). Needs Playwright with Chromium installed.
+ * Browser test of the survey (index.html) and the owner map (map.html).
+ * Needs Playwright with Chromium.
  *
  *   node dev/e2e-test.js [screenshot-dir]
  *
- * Address lookups (Nominatim) are stubbed so the test is repeatable; map
- * tiles and the Leaflet CDN are loaded for real.
+ * The Google Form and the "Publish to web" CSV are stubbed, so nothing is sent
+ * to Google. Map tiles and the Leaflet CDN load for real.
  */
 'use strict';
 
@@ -14,328 +14,371 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { chromium, devices } = require('playwright');
-const { startServer, loadApp, callServer } = require('./preview-server');
+const { startServer } = require('./serve');
 
 const shotDir = process.argv[2] || null;
 const results = [];
-function check(name, fn) {
-  return Promise.resolve().then(fn).then(
-    () => { results.push(['PASS', name]); },
-    (err) => { results.push(['FAIL', name, err]); }
-  );
+async function check(name, fn) {
+  try { await fn(); results.push(['PASS', name]); } catch (err) { results.push(['FAIL', name, err]); }
 }
 
-const valid = (over) => Object.assign({
-  lat: 38.534712, lng: -105.998901, label: 'Miller Ranch', consent: true,
-  street: '', name: '', phone: '', notes: '', website: '',
-}, over);
+const FORM_ID = '1FAIpQLSdTESTONLY0000000000000000000000000000000000000';
+const FORM_LINK = `https://docs.google.com/forms/d/e/${FORM_ID}/viewform?usp=pp_url` +
+  '&entry.1111111111=ADDRESS&entry.2222222222=LAT&entry.3333333333=LNG&entry.4444444444=PHONE';
+const CENTER = [45.6770, -111.0429];
 
-async function serverChecks() {
-  const { context, services } = loadApp();
-  const rpc = (fn, ...args) => callServer(context, fn, args);
-  const throwsWith = (fn, re) => assert.throws(fn, (e) => re.test(e.message));
-
-  await check('server: rejects a missing pin', () =>
-    throwsWith(() => rpc('submitLocation', valid({ lat: '', lng: '' })), /drop a pin/));
-  await check('server: rejects out-of-range coordinates', () =>
-    throwsWith(() => rpc('submitLocation', valid({ lat: 91 })), /drop a pin/));
-  await check('server: rejects a blank address name', () =>
-    throwsWith(() => rpc('submitLocation', valid({ label: '   ' })), /what you call/));
-  await check('server: requires consent === true', () =>
-    throwsWith(() => rpc('submitLocation', valid({ consent: 'yes' })), /confirm/));
-  await check('server: enforces length limits', () =>
-    throwsWith(() => rpc('submitLocation', valid({ notes: 'x'.repeat(1001) })), /1000 characters/));
-  await check('server: map is locked before setup', () =>
-    throwsWith(() => rpc('getSubmissions', 'anything'), /not set up/));
-
-  await check('server: honeypot submissions are accepted but not stored', () => {
-    const res = rpc('submitLocation', valid({ website: 'http://spam.example' }));
-    assert.equal(res.ok, true);
-    const sheet = services.sheets.get('Responses');
-    assert.ok(!sheet || sheet.rows.length <= 1, 'bot row was stored');
-  });
-
-  await check('server: stores a valid row with user text forced to plain text', () => {
-    const res = rpc('submitLocation', valid({ label: '=HYPERLINK("http://x","y")', phone: '+1 555 0100', notes: '3-4' }));
-    assert.match(res.reference, /^[0-9A-F]{8}$/);
-    const sheet = services.sheets.get('Responses');
-    assert.equal(sheet.rows[0][2], 'Address Name');
-    const raw = sheet.rawAppends[sheet.rawAppends.length - 1];
-    assert.equal(raw[2], '\'=HYPERLINK("http://x","y")');
-    assert.equal(raw[7], "'+1 555 0100");
-    assert.equal(raw[8], "'3-4");
-    assert.equal(Object.prototype.toString.call(raw[0]), '[object Date]');
-    assert.equal(raw[3], 38.534712);
-    assert.equal(raw[11], 'New');
-  });
-
-  await check('server: browser cannot call private helpers', () =>
-    throwsWith(() => rpc('ensureAdminKey_'), /not found/));
-  await check('server: setup() via browser returns nothing (no key leak)', () => {
-    const quiet = context.console;
-    context.console = { log() {} };
-    try { assert.equal(rpc('setup'), null); } finally { context.console = quiet; }
-  });
-  await check('server: replaceAdminKey() via browser fails and keeps the key', () => {
-    const before = services.props.get('VESID_ADMIN_KEY');
-    throwsWith(() => rpc('replaceAdminKey'), /getUi/);
-    assert.equal(services.props.get('VESID_ADMIN_KEY'), before);
-  });
-  await check('server: wrong key is refused', () =>
-    throwsWith(() => rpc('getSubmissions', 'wrong'), /not correct/));
-  await check('server: right key returns rows with ISO dates (survives google.script.run)', () => {
-    const key = services.props.get('VESID_ADMIN_KEY');
-    assert.ok(key && key.length >= 32);
-    const rows = rpc('getSubmissions', key);
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].label, '=HYPERLINK("http://x","y")');
-    assert.match(rows[0].submittedAt, /^\d{4}-\d\d-\d\dT/);
-    assert.equal(rows[0].row, 2);
-  });
+function configJs(over) {
+  const cfg = Object.assign({
+    title: 'Voluntary 911 Address Registry', organization: 'Test County 911',
+    intro: 'Drop a pin on your home and type the address the way you call it.',
+    formLink: FORM_LINK, mapCenter: CENTER, mapZoom: 13, themeColor: '#b3261e',
+  }, over);
+  return 'window.VESID_CONFIG = ' + JSON.stringify(cfg) + ';';
 }
 
-const SEARCH_FIXTURE = [
-  { lat: '38.534712', lon: '-105.998901', display_name: '123, Main Street, Salida, Chaffee County, Colorado, 81201, United States',
-    address: { house_number: '123', road: 'Main Street', town: 'Salida', state: 'Colorado', postcode: '81201' } },
-  { lat: '38.540100', lon: '-106.010400', display_name: '123, Main Road, Elsewhere, Colorado, United States',
-    address: { house_number: '123', road: 'Main Road', village: 'Elsewhere', state: 'Colorado' } },
-];
-const REVERSE_FIXTURE = {
-  address: { house_number: '125', road: 'Main Street', town: 'Salida', state: 'Colorado', postcode: '81201' },
-};
-
-async function stubNominatim(page) {
-  await page.route('https://nominatim.openstreetmap.org/**', (route) => {
-    const u = new URL(route.request().url());
-    const body = u.pathname.startsWith('/search') ? SEARCH_FIXTURE : REVERSE_FIXTURE;
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+/** Serves a test config.js and records every request to Google / Nominatim. */
+async function prepare(page, over, log) {
+  await page.route('**/config.js', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/javascript', body: configJs(over) }));
+  await page.route('https://docs.google.com/forms/**', (route) => {
+    log.posts.push({ url: route.request().url(), method: route.request().method(), body: route.request().postData() });
+    if (log.failNext) { log.failNext = false; return route.abort('internetdisconnected'); }
+    return route.fulfill({ status: 200, contentType: 'text/html', body: '<html>ok</html>' });
   });
-}
-
-function trackErrors(page, bucket) {
-  page.on('pageerror', (e) => bucket.push('pageerror: ' + e.message));
-  page.on('console', (m) => { if (m.type() === 'error') bucket.push('console: ' + m.text()); });
+  page.on('request', (r) => { if (/nominatim/.test(r.url())) log.geocoder.push(r.url()); });
+  page.on('pageerror', (e) => log.errors.push('pageerror: ' + e.message));
+  page.on('console', (m) => { if (m.type() === 'error') log.errors.push('console: ' + m.text()); });
 }
 
 async function shot(page, name) {
   if (!shotDir) return;
   fs.mkdirSync(shotDir, { recursive: true });
-  await page.waitForTimeout(900); // let tiles finish
+  await page.waitForTimeout(900);
   await page.screenshot({ path: path.join(shotDir, name), fullPage: true });
 }
 
-async function browserChecks() {
-  const { server, port, app, adminKey } = await startServer({ port: 0, latencyMs: 120, quiet: true });
+async function clickMap(page, fx = 0.5, fy = 0.5) {
+  const box = await page.locator('#map').boundingBox();
+  await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+}
+
+const SHEET_CSV = [
+  'Timestamp,Address,Latitude,Longitude,Phone,Status',
+  '11/10/2026 9:14:02,Curly Pig Ranch,45.684210,-111.051230,406-555-0100,Verified',
+  '11/10/2026 10:02:44,"Frida Blue Horses House, east gate",45.672001,-111.031950,,',
+  '11/11/2026 8:30:10,175621 HWY 212,45.669500,-111.060010,,New',
+  '11/11/2026 8:45:00,"<img src=x onerror=""window.__xss=1"">Bad Label",45.680100,-111.040100,,',
+  '11/11/2026 9:00:00,"Line one\nline two",45.675000,-111.045000,,',
+  '11/11/2026 9:05:00,No pin row,,,,',
+].join('\r\n');
+
+(async () => {
+  const { server, port } = await startServer(0);
   const base = `http://localhost:${port}/`;
   const browser = await chromium.launch();
-  const errors = [];
+  const log = { posts: [], geocoder: [], errors: [], failNext: false };
   try {
+    // ---------------- Survey ----------------
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, acceptDownloads: true });
     const page = await ctx.newPage();
-    trackErrors(page, errors);
-    await stubNominatim(page);
+    await prepare(page, {}, log);
     await page.goto(base);
+    await page.waitForSelector('#map .leaflet-tile-loaded');
 
-    await check('form: renders title from CONFIG and loads Leaflet', async () => {
-      await page.waitForFunction(() => window.L && document.querySelector('.leaflet-tile-pane'));
-      assert.equal(await page.textContent('#title'), app.context.__CONFIG.title);
+    await check('survey: configured form hides the setup notice and shows the phone question', async () => {
+      assert.equal(await page.isHidden('#setup'), true);
+      assert.equal(await page.isVisible('#q-phone'), true);
+      assert.match(await page.textContent('#agree'), /Test County 911/);
     });
 
-    await check('form: empty submit flags pin, address name and consent', async () => {
+    await check('survey: has no address search or auto-filled street field', async () => {
+      assert.equal(await page.$$eval('input[type=search], #street, #fill-btn', (n) => n.length), 0);
+    });
+
+    await check('survey: empty submit flags the pin and the address, sends nothing', async () => {
       await page.click('#submit-btn');
-      for (const id of ['q-pin', 'q-label', 'q-consent']) {
-        assert.ok(await page.$eval('#' + id, (n) => n.classList.contains('has-error')), id + ' not flagged');
-      }
-      assert.equal(await page.$eval('#q-street', (n) => n.classList.contains('has-error')), false);
+      assert.ok(await page.$eval('#q-pin', (n) => n.classList.contains('has-error')));
+      assert.ok(await page.$eval('#q-address', (n) => n.classList.contains('has-error')));
+      assert.equal(log.posts.length, 0);
     });
 
-    await check('form: address search lists matches; picking one drops the pin and fills street', async () => {
-      await page.fill('#search', '123 Main');
-      await page.press('#search', 'Enter');
-      await page.waitForSelector('#results:not([hidden]) li button');
-      assert.equal(await page.$$eval('#results li button', (b) => b.length), 2);
-      await page.click('#results li button >> nth=0');
+    await check('survey: vague answers are caught, specific ones are not (no pin yet, so nothing is sent)', async () => {
+      const verdicts = await page.evaluate(() => {
+        const out = {};
+        for (const t of ['home', 'my house', "grandma's farm", 'The Ranch', 'Dads place',
+          'Curly Pig Ranch', 'Frida Blue Horses House', '175621 HWY 212', 'Lot 14 Pine Ridge']) {
+          document.getElementById('address').value = t;
+          document.getElementById('q-address').classList.remove('has-warn', 'has-error');
+          document.getElementById('submit-btn').click();
+          out[t] = document.getElementById('q-address').classList.contains('has-warn');
+        }
+        document.getElementById('address').value = '';
+        return out;
+      });
+      assert.deepEqual(verdicts, {
+        home: true, 'my house': true, "grandma's farm": true, 'The Ranch': true, 'Dads place': true,
+        'Curly Pig Ranch': false, 'Frida Blue Horses House': false, '175621 HWY 212': false, 'Lot 14 Pine Ridge': false,
+      });
+      assert.equal(log.posts.length, 0);
+    });
+
+    await check('survey: tapping the map drops a pin and zooms in', async () => {
+      await clickMap(page, 0.5, 0.5);
       await page.waitForSelector('.leaflet-marker-icon.pin');
-      assert.match(await page.textContent('#pin-status'), /38\.534712, -105\.998901/);
-      assert.equal(await page.inputValue('#street'), '123 Main Street, Salida, Colorado 81201');
+      assert.match(await page.textContent('#pin-status'), /^Pin placed at 45\.\d{6}, -111\.\d{6}/);
+      assert.equal(await page.evaluate(() => document.querySelector('.leaflet-marker-icon.pin') !== null), true);
       assert.equal(await page.$eval('#q-pin', (n) => n.classList.contains('has-error')), false);
     });
 
-    await check('form: tapping the map moves the pin and re-suggests the street', async () => {
+    await check('survey: a second tap moves the same pin (still one pin)', async () => {
       const before = await page.textContent('#pin-status');
-      const box = await page.locator('#map').boundingBox();
-      await page.mouse.click(box.x + box.width * 0.62, box.y + box.height * 0.45);
+      await clickMap(page, 0.56, 0.47);
       await page.waitForFunction((b) => document.getElementById('pin-status').textContent !== b, before);
-      await page.waitForFunction(() => document.getElementById('street').value.startsWith('125 '));
       assert.equal(await page.$$eval('.leaflet-marker-icon.pin', (m) => m.length), 1);
     });
 
-    await check('form: a typed street address is not overwritten by later pin moves', async () => {
-      await page.fill('#street', '125 Main St, Salida CO');
-      const box = await page.locator('#map').boundingBox();
-      await page.mouse.click(box.x + box.width * 0.55, box.y + box.height * 0.5);
-      await page.waitForTimeout(1200);
-      assert.equal(await page.inputValue('#street'), '125 Main St, Salida CO');
+    await check('survey: "Mom\'s house" gets a vague-answer warning and is not sent', async () => {
+      await page.fill('#address', 'Mom\u2019s house');
+      await page.click('#submit-btn');
+      assert.ok(await page.$eval('#q-address', (n) => n.classList.contains('has-warn')));
+      assert.match(await page.textContent('#address-msg'), /too vague/);
+      assert.equal(log.posts.length, 0);
     });
 
-    const xssLabel = '<img src=x onerror="window.__xss=1">Miller Ranch';
-    await check('form: valid submit shows confirmation with a reference', async () => {
-      await page.fill('#label', xssLabel);
-      await page.fill('#name', 'Pat Miller');
-      await page.fill('#phone', '+1 555 0100');
-      await page.fill('#notes', 'Green gate on the north side. Long gravel driveway.');
-      await page.check('#consent');
-      await shot(page, 'survey-desktop-filled.png');
+    await check('survey: pressing Submit again keeps a vague answer the person insists on', async () => {
+      await clickMap(page, 0.5, 0.5);
+      await page.fill('#address', 'Home');
+      await page.click('#submit-btn');
+      assert.equal(log.posts.length, 0);
       await page.click('#submit-btn');
       await page.waitForSelector('#done:not([hidden])');
-      assert.match(await page.textContent('#done-ref'), /^[0-9A-F]{8}$/);
-      await shot(page, 'survey-desktop-done.png');
-      const sheet = app.services.sheets.get('Responses');
-      assert.equal(sheet.rows.length, 2);
-      assert.equal(sheet.rows[1][2], xssLabel);
-      assert.equal(sheet.rows[1][9], 'Yes');
+      assert.equal(log.posts.length, 1);
+      await page.click('#again-btn');
+      log.posts.length = 0;
     });
 
-    await check('form: "Submit another response" resets everything', async () => {
+    await check('survey: sends address, pin and phone to the Google Form', async () => {
+      await clickMap(page, 0.5, 0.5);
+      await page.fill('#address', 'Curly Pig Ranch');
+      await page.fill('#phone', '406-555-0100');
+      await shot(page, 'survey-desktop.png');
+      const status = await page.textContent('#pin-status');
+      const [lat, lng] = status.match(/(-?\d+\.\d{6}), (-?\d+\.\d{6})/).slice(1);
+      await page.click('#submit-btn');
+      await page.waitForSelector('#done:not([hidden])');
+      assert.equal(log.posts.length, 1);
+      const post = log.posts[0];
+      assert.equal(post.method, 'POST');
+      assert.equal(post.url, `https://docs.google.com/forms/d/e/${FORM_ID}/formResponse`);
+      const sent = Object.fromEntries(new URLSearchParams(post.body));
+      assert.deepEqual(sent, {
+        'entry.1111111111': 'Curly Pig Ranch', 'entry.2222222222': lat,
+        'entry.3333333333': lng, 'entry.4444444444': '406-555-0100',
+      });
+      await shot(page, 'survey-done.png');
+    });
+
+    await check('survey: "Submit another address" clears the pin and answers', async () => {
       await page.click('#again-btn');
-      await page.waitForSelector('#form:not([hidden])');
-      assert.equal(await page.inputValue('#label'), '');
-      assert.equal(await page.isChecked('#consent'), false);
+      assert.equal(await page.inputValue('#address'), '');
+      assert.equal(await page.inputValue('#phone'), '');
       assert.equal(await page.$$eval('.leaflet-marker-icon.pin', (m) => m.length), 0);
     });
 
-    // A few more local sample pins (never committed) so the map has content.
-    const rpc = (fn, ...args) => callServer(app.context, fn, args);
-    rpc('submitLocation', valid({ lat: 38.5391, lng: -106.0042, label: 'The old schoolhouse', street: '410 F St, Salida, Colorado 81201', consent: true }));
-    rpc('submitLocation', valid({ lat: 38.5298, lng: -105.9921, label: 'Blue house past the river bridge', notes: 'Use back door', consent: true }));
-    rpc('submitLocation', valid({ lat: 38.5442, lng: -105.9889, label: 'Lot 14, Pine Ridge Park', consent: true }));
-    const total = app.services.sheets.get('Responses').rows.length - 1;
-
-    await check('form: "Clear form" needs a second click, then clears', async () => {
-      await page.fill('#label', 'Temporary');
-      await page.click('#clear-btn');
-      assert.equal(await page.inputValue('#label'), 'Temporary');
-      assert.equal(await page.textContent('#clear-btn'), 'Click again to clear');
-      await page.click('#clear-btn');
-      assert.equal(await page.inputValue('#label'), '');
-      assert.equal(await page.textContent('#clear-btn'), 'Clear form');
+    await check('survey: a network failure shows an error and keeps the answers', async () => {
+      log.posts.length = 0;
+      log.failNext = true;
+      await clickMap(page, 0.5, 0.5);
+      await page.fill('#address', '175621 HWY 212');
+      await page.click('#submit-btn');
+      await page.waitForSelector('#submit-error:not([hidden])');
+      assert.match(await page.textContent('#submit-error'), /Could not send/);
+      assert.equal(await page.isVisible('#form'), true);
+      assert.equal(await page.inputValue('#address'), '175621 HWY 212');
     });
 
-    await check('map: wrong key is refused', async () => {
-      await page.goto(base + '?view=map');
-      await page.fill('#key', 'not-the-key');
-      await page.click('#gate-btn');
-      await page.waitForSelector('#gate-error:not([hidden])');
-      assert.match(await page.textContent('#gate-error'), /not correct/);
-      assert.equal(await page.isHidden('#app'), true);
+    await check('survey: never contacts an address lookup service', async () => {
+      assert.deepEqual(log.geocoder, []);
+    });
+    await ctx.close();
+
+    await check('survey: without formLink it says setup is needed and sends nothing', async () => {
+      const c = await browser.newContext();
+      const p = await c.newPage();
+      const l = { posts: [], geocoder: [], errors: [] };
+      await prepare(p, { formLink: '' }, l);
+      await p.goto(base);
+      await p.waitForSelector('#map .leaflet-tile-loaded');
+      assert.equal(await p.isVisible('#setup'), true);
+      assert.equal(await p.isHidden('#q-phone'), true);
+      await clickMap(p);
+      await p.fill('#address', 'Curly Pig Ranch');
+      await p.click('#submit-btn');
+      await p.waitForSelector('#submit-error:not([hidden])');
+      assert.match(await p.textContent('#submit-error'), /not set up/);
+      assert.equal(l.posts.length, 0);
+      log.errors.push(...l.errors);
+      await c.close();
     });
 
-    await check('map: right key shows every pin with its label', async () => {
-      await page.fill('#key', adminKey);
-      await page.click('#gate-btn');
-      await page.waitForSelector('#app:not([hidden]) .leaflet-marker-icon');
-      assert.equal(await page.$$eval('.leaflet-marker-icon.pin', (m) => m.length), total);
-      assert.equal(await page.textContent('#count'), total + ' pins');
-      const labels = await page.$$eval('.pin-label', (t) => t.map((n) => n.textContent));
-      assert.ok(labels.includes(xssLabel), 'label shown literally');
-      assert.ok(labels.includes('Lot 14, Pine Ridge Park'));
+    await check('survey: a form link without a PHONE question hides the phone field', async () => {
+      const c = await browser.newContext();
+      const p = await c.newPage();
+      const l = { posts: [], geocoder: [], errors: [] };
+      await prepare(p, { formLink: FORM_LINK.replace('&entry.4444444444=PHONE', '') }, l);
+      await p.goto(base);
+      await p.waitForSelector('#map .leaflet-tile-loaded');
+      assert.equal(await p.isHidden('#setup'), true);
+      assert.equal(await p.isHidden('#q-phone'), true);
+      log.errors.push(...l.errors);
+      await c.close();
+    });
+
+    // ---------------- Owner map ----------------
+    const mctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, acceptDownloads: true });
+    const m = await mctx.newPage();
+    await prepare(m, {}, log);
+    const LIVE = 'https://docs.google.com/spreadsheets/d/e/2PACX-TEST/pub?gid=0&single=true&output=csv';
+    let liveBody = SHEET_CSV;
+    await m.route('https://docs.google.com/spreadsheets/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/csv', headers: { 'Access-Control-Allow-Origin': '*' }, body: liveBody }));
+    const csvFile = path.join(require('os').tmpdir(), 'vesid-test-responses.csv');
+    fs.writeFileSync(csvFile, SHEET_CSV);
+
+    await m.goto(base + 'map.html');
+    await check('map: asks you to open your responses first', async () => {
+      assert.equal(await m.isVisible('#start'), true);
+    });
+
+    await check('map: opening the Sheet CSV shows every pinned row, labelled', async () => {
+      await m.setInputFiles('#file-start', csvFile);
+      await m.waitForSelector('#start', { state: 'hidden' });
+      assert.equal(await m.$$eval('.leaflet-marker-icon.pin', (x) => x.length), 5);
+      assert.equal(await m.textContent('#count'), '5 pins');
+      const labels = await m.$$eval('.pin-label', (t) => t.map((n) => n.textContent));
+      for (const want of ['Curly Pig Ranch', 'Frida Blue Horses House, east gate', '175621 HWY 212', 'Line one\nline two']) {
+        assert.ok(labels.includes(want), 'missing label ' + JSON.stringify(want));
+      }
     });
 
     await check('map: submitted HTML is shown as text, never run', async () => {
-      await page.click('#list li button >> text=Miller Ranch');
-      await page.waitForSelector('.leaflet-popup-content .popup');
-      assert.equal(await page.evaluate(() => window.__xss), undefined);
-      assert.equal(await page.$$eval('.leaflet-popup-content img, #list img', (n) => n.length), 0);
-      assert.match(await page.textContent('.leaflet-popup-content'), /Green gate on the north side/);
-      await shot(page, 'map-desktop.png');
+      assert.equal(await m.evaluate(() => window.__xss), undefined);
+      assert.equal(await m.$$eval('#list img, .leaflet-tooltip img', (x) => x.length), 0);
+      const labels = await m.$$eval('.pin-label', (t) => t.map((n) => n.textContent));
+      assert.ok(labels.some((l) => l.startsWith('<img src=x')));
     });
 
-    await check('map: filter narrows list and pins', async () => {
-      await page.fill('#filter', 'pine ridge');
-      await page.waitForFunction(() => /^1 of /.test(document.getElementById('count').textContent));
-      assert.equal(await page.$$eval('.leaflet-marker-icon.pin', (m) => m.length), 1);
-      await page.fill('#filter', '');
-      await page.waitForFunction((t) => document.getElementById('count').textContent === t + ' pins', total);
+    await check('map: Status column colours pins (Verified is green)', async () => {
+      const fills = await m.$$eval('.leaflet-marker-icon.pin path', (p) => p.map((x) => x.getAttribute('fill')));
+      assert.equal(fills.filter((f) => f === '#188038').length, 1);
     });
 
-    const download = async (kind) => {
-      const [dl] = await Promise.all([page.waitForEvent('download'), page.click(`[data-export=${kind}]`)]);
-      return fs.readFileSync(await dl.path(), 'utf8');
+    await check('map: clicking a list item opens its popup', async () => {
+      await m.click('#list li button >> text=Curly Pig Ranch');
+      await m.waitForSelector('.leaflet-popup-content .popup');
+      assert.match(await m.textContent('.leaflet-popup-content'), /406-555-0100/);
+      await shot(m, 'map-desktop.png');
+    });
+
+    await check('map: filter narrows the pins', async () => {
+      await m.fill('#filter', 'hwy');
+      await m.waitForFunction(() => document.getElementById('count').textContent === '1 of 5 pins');
+      await m.fill('#filter', '');
+      await m.waitForFunction(() => document.getElementById('count').textContent === '5 pins');
+    });
+
+    const dl = async (kind) => {
+      const [d] = await Promise.all([m.waitForEvent('download'), m.click(`[data-export=${kind}]`)]);
+      return fs.readFileSync(await d.path(), 'utf8');
     };
-    await check('map: GeoJSON export has every pin as [lng, lat]', async () => {
-      const fc = JSON.parse(await download('geojson'));
-      assert.equal(fc.features.length, total);
-      const f = fc.features.find((x) => x.properties.label === 'Lot 14, Pine Ridge Park');
-      assert.deepEqual(f.geometry.coordinates, [-105.9889, 38.5442]);
-    });
-    await check('map: KML export is escaped and complete', async () => {
-      const kml = await download('kml');
-      assert.equal((kml.match(/<Placemark>/g) || []).length, total);
-      assert.ok(kml.includes('&lt;img src=x'));
+    await check('map: KML export is complete and escaped', async () => {
+      const kml = await dl('kml');
+      assert.equal((kml.match(/<Placemark>/g) || []).length, 5);
+      assert.ok(kml.includes('<name>Curly Pig Ranch</name>'));
+      assert.ok(kml.includes('-111.05123,45.68421,0'));
       assert.ok(!kml.includes('<img'));
     });
-    await check('map: CSV export has a header plus one line per pin, formulas neutralised', async () => {
-      const csv = (await download('csv')).replace(/^\ufeff/, '');
-      const lines = csv.split('\r\n');
-      assert.equal(lines.length, total + 1);
-      assert.ok(csv.includes('"\'=HYPERLINK') || !csv.includes('=HYPERLINK'));
-      assert.ok(csv.includes('"\'+1 555 0100"'));
+    await check('map: GeoJSON export uses [lng, lat]', async () => {
+      const fc = JSON.parse(await dl('geojson'));
+      assert.equal(fc.features.length, 5);
+      const f = fc.features.find((x) => x.properties.address === '175621 HWY 212');
+      assert.deepEqual(f.geometry.coordinates, [-111.06001, 45.6695]);
     });
 
-    await check('map: key is remembered on reload, and Lock forgets it', async () => {
-      await page.reload();
-      await page.waitForSelector('#app:not([hidden]) .leaflet-marker-icon');
-      await page.click('#lock-btn');
-      await page.waitForSelector('#gate:not([hidden])');
-      assert.equal(await page.isHidden('#app'), true);
+    await check('map: a CSV without Latitude/Longitude gives a clear error', async () => {
+      const bad = path.join(require('os').tmpdir(), 'vesid-bad.csv');
+      fs.writeFileSync(bad, 'Name,Thing\nA,B\n');
+      await m.setInputFiles('#file-top', bad);
+      await m.waitForFunction(() => /Latitude/.test(document.getElementById('status').textContent));
+      assert.ok(await m.$eval('#status', (s) => s.classList.contains('error')));
     });
 
-    await ctx.close();
+    await check('map: live link loads, is remembered on reload, and refreshes', async () => {
+      await m.click('#link-btn');
+      await m.fill('#link-input', LIVE);
+      await m.click('#link-form button[type=submit]');
+      await m.waitForFunction(() => /from your live link/.test(document.getElementById('status').textContent));
+      assert.equal(await m.textContent('#count'), '5 pins');
+      await m.waitForSelector('#refresh-btn:not([hidden])');
+      await m.reload();
+      await m.waitForFunction(() => document.getElementById('count').textContent === '5 pins');
+      liveBody = SHEET_CSV + '\r\n11/12/2026 7:00:00,Hilltop Water Tower Place,45.690000,-111.020000,,';
+      await m.click('#refresh-btn');
+      await m.waitForFunction(() => document.getElementById('count').textContent === '6 pins');
+    });
 
-    // Phone-sized screenshots and a layout check.
-    const phone = await browser.newContext(Object.assign({}, devices['iPhone 13'], { acceptDownloads: true }));
-    const p = await phone.newPage();
-    trackErrors(p, errors);
-    await stubNominatim(p);
-    await check('phone: survey fits the screen with no sideways scroll', async () => {
+    await check('map: a link that returns a web page explains what to use instead', async () => {
+      liveBody = '<!DOCTYPE html><html><body>Sheet</body></html>';
+      await m.click('#refresh-btn');
+      await m.waitForFunction(() => /not a CSV/.test(document.getElementById('status').textContent));
+      liveBody = SHEET_CSV;
+    });
+
+    await check('map: Forget link removes it from this device', async () => {
+      await m.click('#link-btn');
+      await m.click('#forget-btn');
+      await m.reload();
+      assert.equal(await m.isVisible('#start'), true);
+      assert.equal(await m.isHidden('#refresh-btn'), true);
+    });
+    await mctx.close();
+
+    // ---------------- Phone ----------------
+    const ph = await browser.newContext(Object.assign({}, devices['iPhone 13'], { acceptDownloads: true }));
+    const p = await ph.newPage();
+    await prepare(p, {}, log);
+    await check('phone: survey fits with no sideways scroll', async () => {
       await p.goto(base);
       await p.waitForSelector('#map .leaflet-tile-loaded');
+      await p.click('.seg button[data-layer=satellite]');
+      await clickMap(p, 0.5, 0.5);
+      await p.fill('#address', 'Curly Pig Ranch');
       const overflow = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       assert.ok(overflow <= 0, 'horizontal overflow ' + overflow + 'px');
-      await p.fill('#search', '123 Main');
-      await p.click('#search-btn');
-      await p.click('#results li button >> nth=0');
-      await p.fill('#label', 'Miller Ranch');
-      await p.click('.seg button[data-layer=satellite]');
       await shot(p, 'survey-phone.png');
     });
-    await check('phone: owner map fits the screen', async () => {
-      await p.goto(base + '?view=map');
-      await p.fill('#key', adminKey);
-      await p.click('#gate-btn');
-      await p.waitForSelector('#app:not([hidden]) .leaflet-marker-icon');
+    await check('phone: owner map fits with no sideways scroll', async () => {
+      await p.goto(base + 'map.html');
+      await p.setInputFiles('#file-start', csvFile);
+      await p.waitForSelector('#start', { state: 'hidden' });
       const overflow = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       assert.ok(overflow <= 0, 'horizontal overflow ' + overflow + 'px');
       await shot(p, 'map-phone.png');
     });
-    await phone.close();
+    await ph.close();
 
     await check('no JavaScript errors on any page', () => {
-      assert.deepEqual(errors, []);
+      assert.deepEqual(log.errors.filter((e) => !/net::ERR_INTERNET_DISCONNECTED/.test(e)), []);
     });
   } finally {
     await browser.close();
     server.close();
   }
-}
 
-(async () => {
-  await serverChecks();
-  await browserChecks();
   let failed = 0;
   for (const [status, name, err] of results) {
     console.log(`${status}  ${name}`);
-    if (err) { failed++; console.log('      ' + String(err && err.stack || err).split('\n').slice(0, 4).join('\n      ')); }
+    if (err) { failed++; console.log('      ' + String((err && err.stack) || err).split('\n').slice(0, 5).join('\n      ')); }
   }
   console.log(`\n${results.length - failed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

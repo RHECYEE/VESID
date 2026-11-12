@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Address Map</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap">
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
+        integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb"
+        crossorigin="anonymous">
+  <style>
+    :root {
+      --accent: #b3261e;
+      --text: #202124;
+      --muted: #5f6368;
+      --border: #dadce0;
+      --error: #d93025;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { margin: 0; height: 100%; }
+    body { color: var(--text); background: #f1f3f4; font: 14px/1.45 Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
+    button, .btn { font: inherit; cursor: pointer; }
+    button:focus-visible, .btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+    input[type=search], input[type=url] {
+      font: inherit; font-size: 14px; color: var(--text); border: 1px solid var(--border);
+      border-radius: 4px; padding: 7px 10px; background: #fff; outline: none; min-width: 0;
+    }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .btn {
+      display: inline-block; background: #fff; color: var(--accent); border: 1px solid var(--border);
+      border-radius: 4px; padding: 6px 12px; font-weight: 500; white-space: nowrap;
+    }
+    .btn:hover { background: color-mix(in srgb, var(--accent) 7%, #ffffff); }
+    .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-primary:hover { background: var(--accent); filter: brightness(1.08); }
+    .btn input[type=file] { display: none; }
+
+    .app { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+    .topbar {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px;
+      background: #fff; border-top: 4px solid var(--accent); border-bottom: 1px solid var(--border);
+    }
+    .topbar h1 { font-size: 18px; font-weight: 500; margin: 0; }
+    .count { color: var(--muted); }
+    .spacer { flex: 1; }
+    .tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+    .seg button { background: #fff; border: 0; padding: 6px 12px; color: var(--muted); }
+    .seg button + button { border-left: 1px solid var(--border); }
+    .seg button[aria-pressed=true] { background: var(--accent); color: #fff; }
+    .check { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); cursor: pointer; }
+    .check input { accent-color: var(--accent); }
+
+    .panel { padding: 12px 16px; background: #fff; border-bottom: 1px solid var(--border); }
+    .panel p { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+    .panel-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .panel-row input { flex: 1 1 280px; }
+    .status { padding: 8px 16px; font-size: 13px; background: #fff; border-bottom: 1px solid var(--border); color: var(--muted); }
+    .status.error { color: var(--error); }
+
+    .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 340px 1fr; position: relative; }
+    .side { display: flex; flex-direction: column; min-height: 0; background: #fff; border-right: 1px solid var(--border); }
+    .side-head { padding: 12px; border-bottom: 1px solid var(--border); }
+    .side-head input { width: 100%; }
+    .list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+    .list li + li { border-top: 1px solid #eceff1; }
+    .list button { display: block; width: 100%; text-align: left; background: #fff; border: 0; padding: 10px 14px; }
+    .list button:hover, .list button.active { background: color-mix(in srgb, var(--accent) 6%, #ffffff); }
+    .item-label { font-weight: 500; overflow-wrap: anywhere; }
+    .item-sub { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .empty { padding: 24px 16px; color: var(--muted); }
+    .chip { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; color: #fff; margin-left: 6px; vertical-align: 1px; }
+
+    .map { min-height: 0; z-index: 0; }
+    .pin { background: none; border: 0; filter: drop-shadow(0 2px 2px rgba(0,0,0,.35)); }
+    .leaflet-tooltip.pin-label {
+      font: 500 12px/1.2 Roboto, Arial, sans-serif; padding: 3px 7px; border-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.3); max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .hide-labels .leaflet-tooltip.pin-label { display: none; }
+    .popup { font: 13px/1.45 Roboto, Arial, sans-serif; min-width: 190px; max-width: 270px; }
+    .popup h3 { font-size: 15px; font-weight: 500; margin: 0 0 4px; overflow-wrap: anywhere; }
+    .popup p { margin: 4px 0; overflow-wrap: anywhere; }
+    .popup .k { color: var(--muted); }
+    .popup .meta { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+    .start {
+      position: absolute; inset: 0; z-index: 500; display: grid; place-items: center; padding: 16px;
+      background: rgba(241,243,244,.92);
+    }
+    .start.drag { outline: 3px dashed var(--accent); outline-offset: -12px; }
+    .start-card {
+      width: 100%; max-width: 520px; background: #fff; border: 1px solid var(--border);
+      border-top: 10px solid var(--accent); border-radius: 8px; padding: 24px;
+    }
+    .start-card h2 { font-size: 22px; font-weight: 400; margin: 0 0 12px; }
+    .start-card ol { margin: 0 0 16px; padding-left: 20px; }
+    .start-card li { margin-bottom: 4px; }
+    .start-card .alt { color: var(--muted); font-size: 13px; margin: 16px 0 0; }
+
+    @media (max-width: 760px) {
+      .body { grid-template-columns: 1fr; grid-template-rows: 55vh auto; overflow-y: auto; }
+      .map { grid-row: 1; }
+      .side { grid-row: 2; border-right: 0; border-top: 1px solid var(--border); }
+      .list { overflow: visible; }
+      .topbar { padding: 10px 12px; }
+      .spacer { display: none; }
+      .start { position: fixed; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <h1 id="app-title">Address map</h1>
+      <span class="count" id="count"></span>
+      <span class="spacer"></span>
+      <div class="tools">
+        <label class="check"><input type="checkbox" id="labels-toggle" checked> Labels</label>
+        <div class="seg" role="group" aria-label="Map type">
+          <button type="button" data-layer="street" aria-pressed="true">Map</button>
+          <button type="button" data-layer="satellite" aria-pressed="false">Satellite</button>
+        </div>
+        <label class="btn">Open CSV<input type="file" id="file-top" accept=".csv,text/csv"></label>
+        <button type="button" class="btn" id="link-btn">Live link</button>
+        <button type="button" class="btn" id="refresh-btn" hidden>Refresh</button>
+        <button type="button" class="btn" data-export="kml" title="Download the pins shown as KML (Google Earth, most CAD/GIS)">KML</button>
+        <button type="button" class="btn" data-export="geojson" title="Download the pins shown as GeoJSON (GIS)">GeoJSON</button>
+      </div>
+    </header>
+
+    <div class="panel" id="link-panel" hidden>
+      <p>Paste your Sheet's <strong>Publish to web</strong> CSV link (README step 5). It is saved only in this browser.
+        Anyone who has that link can read the responses, so keep it private.</p>
+      <form class="panel-row" id="link-form">
+        <input type="url" id="link-input" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv" aria-label="Published CSV link">
+        <button type="submit" class="btn btn-primary">Load</button>
+        <button type="button" class="btn" id="forget-btn">Forget link</button>
+      </form>
+    </div>
+    <div class="status" id="status" role="status" hidden></div>
+
+    <div class="body">
+      <aside class="side">
+        <div class="side-head">
+          <input type="search" id="filter" placeholder="Filter by address or phone..." aria-label="Filter pins">
+        </div>
+        <ul class="list" id="list"></ul>
+      </aside>
+      <div class="map" id="map"></div>
+
+      <div class="start" id="start">
+        <div class="start-card">
+          <h2>Open your responses</h2>
+          <ol>
+            <li>Open the Google Sheet linked to your Form.</li>
+            <li>Choose <strong>File &gt; Download &gt; Comma Separated Values (.csv)</strong>.</li>
+            <li>Choose that file here, or drag it onto this page.</li>
+          </ol>
+          <label class="btn btn-primary">Choose CSV file<input type="file" id="file-start" accept=".csv,text/csv"></label>
+          <p class="alt">Want the map to update by itself? Use <strong>Live link</strong> at the top (README step 5).
+            Files you open here stay on this device and are not uploaded anywhere.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
+          integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO"
+          crossorigin="anonymous"></script>
+  <script>
+  (function () {
+    'use strict';
+    var C = window.VESID_CONFIG || {};
+    var LINK_KEY = 'vesid-csv-link';
+    var $ = function (id) { return document.getElementById(id); };
+    if (C.themeColor) document.documentElement.style.setProperty('--accent', C.themeColor);
+    var title = (C.title || 'Address Registry') + ' - Map';
+    document.title = title;
+    $('app-title').textContent = title;
+
+    var store = {
+      get: function () { try { return localStorage.getItem(LINK_KEY) || ''; } catch (e) { return ''; } },
+      set: function (v) { try { localStorage.setItem(LINK_KEY, v); } catch (e) { /* unavailable */ } },
+      clear: function () { try { localStorage.removeItem(LINK_KEY); } catch (e) { /* unavailable */ } }
+    };
+
+    if (!window.L) { showStatus('The map library could not load. Check your connection and reload.', true); return; }
+
+    // ---- Map -----------------------------------------------------------
+    var map = L.map('map').setView(C.mapCenter || [39.8283, -98.5795], C.mapZoom || 4);
+    var layers = {
+      street: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 20, maxNativeZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+      }),
+      satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 20, maxNativeZoom: 19,
+        attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'
+      })
+    };
+    var activeLayer = layers.street.addTo(map);
+    var group = L.featureGroup().addTo(map);
+    map.on('zoomend', updateLabelVisibility);
+    window.addEventListener('resize', function () { map.invalidateSize(); });
+    document.querySelectorAll('.seg button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var next = layers[btn.getAttribute('data-layer')];
+        if (next === activeLayer) return;
+        map.removeLayer(activeLayer);
+        activeLayer = next.addTo(map);
+        document.querySelectorAll('.seg button').forEach(function (b) { b.setAttribute('aria-pressed', String(b === btn)); });
+      });
+    });
+
+    var rows = [];
+    var markers = [];
+
+    // ---- CSV -----------------------------------------------------------
+    function parseCSV(text) {
+      text = String(text).replace(/^\ufeff/, '');
+      var out = [], row = [], field = '', inQuotes = false;
+      for (var i = 0; i < text.length; i++) {
+        var c = text[i];
+        if (inQuotes) {
+          if (c === '"') {
+            if (text[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; }
+          } else { field += c; }
+        } else if (c === '"') { inQuotes = true; }
+        else if (c === ',') { row.push(field); field = ''; }
+        else if (c === '\n') { row.push(field); out.push(row); row = []; field = ''; }
+        else if (c !== '\r') { field += c; }
+      }
+      if (field !== '' || row.length) { row.push(field); out.push(row); }
+      return out;
+    }
+
+    // Finds the columns by their header names (the Google Form question titles).
+    function toRows(table) {
+      if (!table.length) throw new Error('That file is empty.');
+      var head = table[0].map(function (h) { return h.trim().toLowerCase(); });
+      var find = function (re) { for (var i = 0; i < head.length; i++) if (re.test(head[i])) return i; return -1; };
+      var ix = {
+        lat: find(/^lat(itude)?\b/),
+        lng: find(/^(lng|lon|long|longitude)\b/),
+        address: find(/address|call/),
+        phone: find(/phone/),
+        time: find(/timestamp|submitted/),
+        status: find(/^status$/)
+      };
+      if (ix.lat < 0 || ix.lng < 0) {
+        throw new Error('Could not find "Latitude" and "Longitude" columns. Open the CSV of your Form responses.');
+      }
+      var cell = function (r, i) { return i < 0 || r[i] === undefined ? '' : String(r[i]).trim(); };
+      var out = [];
+      for (var r = 1; r < table.length; r++) {
+        var row = table[r];
+        var lat = parseFloat(cell(row, ix.lat));
+        var lng = parseFloat(cell(row, ix.lng));
+        if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
+        out.push({
+          row: r + 1, lat: lat, lng: lng,
+          label: cell(row, ix.address), phone: cell(row, ix.phone),
+          time: cell(row, ix.time), status: cell(row, ix.status)
+        });
+      }
+      return out;
+    }
+
+    function loadText(text, sourceNote) {
+      try {
+        if (/^\s*<(!doctype|html)/i.test(text)) {
+          throw new Error('That link opened a web page, not a CSV. In "Publish to web", choose "Comma-separated values (.csv)".');
+        }
+        var data = toRows(parseCSV(text));
+        render(data);
+        $('start').hidden = true;
+        showStatus(data.length + (data.length === 1 ? ' pin' : ' pins') + ' loaded ' + sourceNote + '.');
+        return true;
+      } catch (err) {
+        showStatus(err.message, true);
+        return false;
+      }
+    }
+
+    function readFile(file) {
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () { loadText(reader.result, 'from ' + file.name); };
+      reader.onerror = function () { showStatus('Could not read that file.', true); };
+      reader.readAsText(file);
+    }
+    ['file-top', 'file-start'].forEach(function (id) {
+      $(id).addEventListener('change', function () { readFile(this.files[0]); this.value = ''; });
+    });
+    var start = $('start');
+    ['dragenter', 'dragover'].forEach(function (t) {
+      document.addEventListener(t, function (e) { e.preventDefault(); start.classList.add('drag'); });
+    });
+    ['dragleave', 'drop'].forEach(function (t) {
+      document.addEventListener(t, function (e) { e.preventDefault(); if (t === 'drop' || e.target === start) start.classList.remove('drag'); });
+    });
+    document.addEventListener('drop', function (e) {
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) readFile(f);
+    });
+
+    // ---- Live link (Google Sheets "Publish to web" CSV) ---------------
+    var link = store.get();
+    function fetchLink(url) {
+      showStatus('Loading responses...');
+      $('refresh-btn').disabled = true;
+      var sep = url.indexOf('?') === -1 ? '?' : '&';
+      return fetch(url + sep + '_=' + Date.now(), { cache: 'no-store' })
+        .then(function (r) {
+          if (!r.ok) throw new Error('The link answered with an error (' + r.status + '). Check that it is still published.');
+          return r.text();
+        })
+        .then(function (text) { return loadText(text, 'from your live link at ' + new Date().toLocaleTimeString()); })
+        .catch(function (err) {
+          showStatus(err instanceof TypeError
+            ? 'Could not load that link. Use the "Publish to web" CSV link, not the normal Sheet link.'
+            : err.message, true);
+          return false;
+        })
+        .then(function (ok) { $('refresh-btn').disabled = false; return ok; });
+    }
+    $('link-btn').addEventListener('click', function () {
+      $('link-panel').hidden = !$('link-panel').hidden;
+      $('link-input').value = link;
+      if (!$('link-panel').hidden) $('link-input').focus();
+    });
+    $('link-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var url = $('link-input').value.trim();
+      if (!/^https:\/\//i.test(url)) { showStatus('Paste the full link, starting with https://', true); return; }
+      fetchLink(url).then(function (ok) {
+        if (!ok) return;
+        link = url;
+        store.set(url);
+        $('refresh-btn').hidden = false;
+        $('link-panel').hidden = true;
+      });
+    });
+    $('forget-btn').addEventListener('click', function () {
+      link = '';
+      store.clear();
+      $('link-input').value = '';
+      $('refresh-btn').hidden = true;
+      showStatus('Live link forgotten on this device.');
+    });
+    $('refresh-btn').addEventListener('click', function () { if (link) fetchLink(link); });
+    if (link) { $('refresh-btn').hidden = false; fetchLink(link); }
+
+    // ---- Render --------------------------------------------------------
+    function statusColor(s) {
+      s = String(s || '').trim().toLowerCase();
+      if (s === '' || s === 'new') return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#b3261e';
+      if (s === 'verified') return '#188038';
+      return '#5f6368';
+    }
+    function pinIcon(color) {
+      return L.divIcon({
+        className: 'pin',
+        html: '<svg width="28" height="38" viewBox="0 0 34 46" aria-hidden="true">' +
+              '<path d="M17 1C8.2 1 1 8 1 16.7 1 28.5 17 45 17 45s16-16.5 16-28.3C33 8 25.8 1 17 1z" ' +
+              'fill="' + color + '" stroke="#fff" stroke-width="2.4"/><circle cx="17" cy="16.5" r="6" fill="#fff"/></svg>',
+        iconSize: [28, 38], iconAnchor: [14, 37], popupAnchor: [0, -34], tooltipAnchor: [0, -36]
+      });
+    }
+    function el(tag, cls, text) {
+      var n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text !== undefined && text !== null) n.textContent = text;
+      return n;
+    }
+    function popupFor(r) {
+      var box = el('div', 'popup');
+      box.appendChild(el('h3', '', r.label || '(no address given)'));
+      var kv = function (k, v) {
+        if (!v) return;
+        var p = el('p');
+        p.appendChild(el('span', 'k', k + ': '));
+        p.appendChild(document.createTextNode(v));
+        box.appendChild(p);
+      };
+      kv('Phone', r.phone);
+      kv('Pin', r.lat.toFixed(6) + ', ' + r.lng.toFixed(6));
+      var a = el('a', '', 'Open in Google Maps');
+      a.href = 'https://www.google.com/maps/search/?api=1&query=' + r.lat + ',' + r.lng;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      var p = el('p');
+      p.appendChild(a);
+      box.appendChild(p);
+      box.appendChild(el('p', 'meta', [r.status || 'New', r.time, 'Sheet row ' + r.row].filter(Boolean).join(' | ')));
+      return box;
+    }
+
+    function render(data) {
+      rows = data.slice().reverse(); // newest first (Forms appends new rows at the bottom)
+      markers = rows.map(function (r) {
+        var m = L.marker([r.lat, r.lng], { icon: pinIcon(statusColor(r.status)), title: r.label });
+        m.bindPopup(popupFor(r), { maxWidth: 290 });
+        m.bindTooltip(el('span', '', r.label || '(no address given)'),
+          { permanent: true, direction: 'top', className: 'pin-label', interactive: false });
+        return m;
+      });
+      applyFilter();
+      var b = group.getBounds();
+      if (b.isValid()) map.fitBounds(b.pad(0.15), { maxZoom: 17 });
+    }
+
+    function visible() {
+      var q = $('filter').value.trim().toLowerCase();
+      var out = [];
+      rows.forEach(function (r, i) {
+        if (!q || [r.label, r.phone, r.status].join(' ').toLowerCase().indexOf(q) !== -1) out.push(i);
+      });
+      return out;
+    }
+
+    function applyFilter() {
+      var vis = visible();
+      var list = $('list');
+      list.innerHTML = '';
+      group.clearLayers();
+      vis.forEach(function (i) {
+        var r = rows[i];
+        group.addLayer(markers[i]);
+        var b = el('button');
+        b.type = 'button';
+        var lab = el('div', 'item-label', r.label || '(no address given)');
+        var chip = el('span', 'chip', r.status || 'New');
+        chip.style.background = statusColor(r.status);
+        lab.appendChild(chip);
+        b.appendChild(lab);
+        b.appendChild(el('div', 'item-sub', [r.phone, r.time].filter(Boolean).join(' | ') || (r.lat.toFixed(5) + ', ' + r.lng.toFixed(5))));
+        b.addEventListener('click', function () {
+          list.querySelectorAll('button.active').forEach(function (x) { x.classList.remove('active'); });
+          b.classList.add('active');
+          map.setView([r.lat, r.lng], Math.max(map.getZoom(), 17), { animate: false });
+          markers[i].openPopup();
+          if (window.matchMedia('(max-width: 760px)').matches) $('map').scrollIntoView({ behavior: 'smooth' });
+        });
+        var li = el('li');
+        li.appendChild(b);
+        list.appendChild(li);
+      });
+      if (!vis.length) list.appendChild(el('li', 'empty', rows.length ? 'No pins match the filter.' : 'No pins yet.'));
+      $('count').textContent = vis.length === rows.length
+        ? rows.length + (rows.length === 1 ? ' pin' : ' pins')
+        : vis.length + ' of ' + rows.length + ' pins';
+      updateLabelVisibility();
+    }
+
+    function updateLabelVisibility() {
+      var crowded = group.getLayers().length > 40 && map.getZoom() < 14;
+      $('map').classList.toggle('hide-labels', !$('labels-toggle').checked || crowded);
+    }
+    var filterTimer = null;
+    $('filter').addEventListener('input', function () { clearTimeout(filterTimer); filterTimer = setTimeout(applyFilter, 150); });
+    $('labels-toggle').addEventListener('change', updateLabelVisibility);
+
+    function showStatus(msg, isError) {
+      var s = $('status');
+      s.textContent = msg;
+      s.classList.toggle('error', !!isError);
+      s.hidden = false;
+    }
+
+    // ---- Export --------------------------------------------------------
+    function xml(s) {
+      return String(s === null || s === undefined ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+    }
+    function download(name, type, text) {
+      var url = URL.createObjectURL(new Blob([text], { type: type }));
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    }
+    document.querySelectorAll('[data-export]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var data = visible().map(function (i) { return rows[i]; });
+        if (!data.length) { showStatus('Open your responses first, then export.', true); return; }
+        var base = 'address-pins-' + new Date().toISOString().slice(0, 10);
+        if (btn.getAttribute('data-export') === 'geojson') {
+          download(base + '.geojson', 'application/geo+json', JSON.stringify({
+            type: 'FeatureCollection',
+            features: data.map(function (r) {
+              return { type: 'Feature', geometry: { type: 'Point', coordinates: [r.lng, r.lat] },
+                properties: { address: r.label, phone: r.phone, status: r.status || 'New', submitted: r.time } };
+            })
+          }, null, 2));
+        } else {
+          var out = ['<?xml version="1.0" encoding="UTF-8"?>', '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>',
+            '<name>' + xml(C.title || 'Address pins') + '</name>'];
+          data.forEach(function (r) {
+            out.push('<Placemark><name>' + xml(r.label) + '</name><description>' +
+              xml([r.phone && 'Phone: ' + r.phone, r.time && 'Submitted: ' + r.time].filter(Boolean).join('\n')) +
+              '</description><ExtendedData>' +
+              '<Data name="Address"><value>' + xml(r.label) + '</value></Data>' +
+              '<Data name="Phone"><value>' + xml(r.phone) + '</value></Data>' +
+              '<Data name="Status"><value>' + xml(r.status || 'New') + '</value></Data>' +
+              '<Data name="Submitted"><value>' + xml(r.time) + '</value></Data>' +
+              '</ExtendedData><Point><coordinates>' + r.lng + ',' + r.lat + ',0</coordinates></Point></Placemark>');
+          });
+          out.push('</Document></kml>');
+          download(base + '.kml', 'application/vnd.google-earth.kml+xml', out.join('\n'));
+        }
+      });
+    });
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+// Settings for the survey (index.html) and your map (map.html).
+// Edit on GitHub with the pencil icon, then "Commit changes". See README.md.
+window.VESID_CONFIG = {
+  title: 'Voluntary 911 Address Registry',
+
+  // Who receives the responses, shown on the survey. Example: 'Smith County 911'
+  organization: '',
+
+  intro: 'Help emergency responders find your home. Drop a pin on your home and ' +
+    'type the address the way you call it. Sharing is voluntary.',
+
+  // Paste your Google Form's pre-filled link here, between the quotes
+  // (README step 2). It starts with https://docs.google.com/forms/d/e/
+  formLink: '',
+
+  // Where the map starts: [latitude, longitude] and zoom
+  // (4 = whole US, 10 = a county, 13 = a town).
+  mapCenter: [39.8283, -98.5795],
+  mapZoom: 4,
+
+  themeColor: '#b3261e'
+};
